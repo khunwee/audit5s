@@ -1,0 +1,43 @@
+{% macro tag(pct, big=false) -%}
+<span class="tag tag-{{ band(pct) }}{{ ' tag-big' if big }}">{% if pct is none %}ยังไม่มีคะแนน{% else %}<span>{{ pct|num }}</span><small>%</small>{% endif %}</span>
+{%- endmacro %}
+
+{% macro chip(p) -%}
+<span class="chip chip-{{ p.status }}">{{ STATUS[p.status] }}</span>{% if p.overridden %} <span class="chip chip-plain">ปรับโดยกรรมการ</span>{% endif %}{% if p.review_flag %} <span class="chip chip-rejected">ควรให้กรรมการตรวจ</span>{% endif %}{% if not p.has_image %} <span class="chip chip-plain">ลบภาพเต็มแล้ว</span>{% endif %}
+{%- endmacro %}
+
+{% macro levels(c) -%}
+{% if c.na %}<span class="lv-na">ภาพนี้ไม่มีหลักฐานพอให้ประเมิน</span>{% else %}<span class="lv" role="img" aria-label="ระดับ {{ c.level }} จาก 4">{% for i in range(1, 5) %}<i class="{{ 'on' if i <= c.level }}"></i>{% endfor %}</span>{% endif %}
+{%- endmacro %}
+
+{% macro bar(pct) -%}
+<span class="bar"><span class="bar-fill bar-{{ band(pct) }}" style="width: {{ pct or 0 }}%"></span></span>
+{%- endmacro %}
+
+{# ผลวิเคราะห์ของภาพหนึ่งใบ: ใช้ทั้งหน้ารายละเอียดภาพและรายงาน #}
+{% macro analysis(p, compact=false) %}
+{% set a = p.analysis or {} %}
+{% if p.status in ('pending', 'processing') %}
+  <p class="note blue">ภาพนี้อยู่ในคิว รอ AI วิเคราะห์{% if p.error %} ({{ p.error }}){% endif %}</p>
+{% elif p.status == 'error' %}
+  <p class="note red">วิเคราะห์ไม่สำเร็จ: {{ p.error or 'ไม่ทราบสาเหตุ' }}</p>
+{% elif p.status == 'rejected' %}
+  <p class="note">ภาพนี้ใช้ประเมินไม่ได้ จึงไม่นำไปคิดคะแนน{% if a.image_issue %}: {{ a.image_issue }}{% endif %} ถ่ายใหม่ให้เห็นพื้นที่ทำงานชัดเจนแล้วส่งอีกครั้ง</p>
+{% else %}
+  {% if a.scene and not compact %}<p><b>สิ่งที่เห็นในภาพ</b> {{ a.scene }}</p>{% endif %}
+  {% if a.summary %}<p><b>สรุป</b> {{ a.summary }}</p>{% endif %}
+  {% if p.overridden %}<p class="note">กรรมการปรับคะแนนภาพนี้ โดย {{ p.override_by }} เมื่อ {{ p.override_at|dt }} เหตุผล: {{ p.override_note }}</p>{% endif %}
+  {% for c in a.criteria or [] %}
+  <div class="crit">
+    <div class="crit-head">
+      <h3>{{ c.name }}</h3>
+      {{ levels(c) }}{% if c.seen %}<span class="chip chip-plain" title="AI ประเมินสองรอบได้ผลต่างกัน ระบบยึดระดับที่ต่ำกว่า">สองรอบได้ {{ c.seen }}</span>{% endif %}
+      <span class="crit-score">{% if c.na %}ไม่คิดคะแนน{% else %}{{ c.score|num }} / {{ c.max|num }}{% endif %}</span>
+    </div>
+    {% if c.reason %}<p>{{ c.reason }}</p>{% endif %}
+    {% if c.findings and not compact %}<span class="lbl">สิ่งที่พบ</span><ul>{% for x in c.findings %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if c.recommendations %}<span class="lbl">ควรทำ</span><ul>{% for x in c.recommendations %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% endfor %}
+{% endif %}
+{% endmacro %}

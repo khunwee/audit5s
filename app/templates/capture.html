@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}ถ่ายภาพส่งตรวจ{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>ถ่ายภาพส่งตรวจ</h1><p>หนึ่งภาพต่อหนึ่งจุดตรวจ ส่งได้ไม่จำกัดจำนวน</p></div></div>
+{% if not rounds %}
+  <div class="empty"><h2>ยังไม่มีรอบการตรวจที่เปิดรับภาพ</h2>
+    {% if can(user, 'rounds') %}<a class="btn primary" href="/admin/rounds">สร้างรอบการตรวจ</a>{% else %}<p>รอผู้ดูแลระบบเปิดรอบ แล้วกลับมาที่หน้านี้</p>{% endif %}</div>
+{% elif not depts %}
+  <div class="empty"><h2>บัญชีของคุณยังไม่ได้ผูกกับแผนก</h2><p>แจ้งผู้ดูแลระบบให้กำหนดแผนกของคุณ แล้วเข้าสู่ระบบใหม่</p></div>
+{% elif usage.level == 'full' %}
+  <div class="empty"><h2>พื้นที่จัดเก็บเต็ม</h2><p>ระบบหยุดรับภาพชั่วคราว แจ้งผู้ดูแลระบบให้สำรองข้อมูลและลบภาพเก่า</p></div>
+{% else %}
+<div class="stack" id="capture" data-max-side="{{ [settings.img_max_side * 1.25, 2400]|min|int }}" data-webcam-width="{{ settings.webcam_width }}"
+     {% if before %}data-after="{{ before.id }}" data-area="{{ before.area_name }}" data-type="{{ before.area_type }}"{% endif %}>
+  {% if before %}
+  <p class="note blue">ส่งภาพหลังแก้ไขของจุด "{{ before.area_name }}" (ภาพเลขที่ {{ before.id }}{% if before.percent is not none %}, เดิมได้ {{ before.percent|num }}%{% endif %})
+    ถ่ายมุมเดียวกับภาพเดิมเพื่อให้เทียบกันได้{% if settings.after_replaces %} เมื่อภาพใหม่ได้คะแนนแล้ว ระบบจะนับภาพใหม่แทนภาพเดิม{% endif %}</p>
+  {% endif %}
+  {% if not ai_ready %}<p class="note">ยังไม่ได้ตั้งค่า AI ส่งภาพได้ตามปกติ ภาพจะรอในคิวและได้คะแนนเมื่อผู้ดูแลตั้งค่าเสร็จ</p>{% endif %}
+  <section class="panel">
+    <div class="grid-2">
+      <label class="field"><span>รอบการตรวจ</span>
+        <select id="round">{% for r in rounds %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select></label>
+      <label class="field"><span>แผนกเจ้าของพื้นที่</span>
+        <select id="dept">{% if depts|length > 1 %}<option value="">เลือกแผนก</option>{% endif %}{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if (before and d.id == before.department_id) or (not before and d.id == user.department_id) }}>{{ d.name }}</option>{% endfor %}</select></label>
+    </div>
+  </section>
+
+  <div class="queue" id="queue" aria-live="polite"></div>
+
+  <div class="shoot-bar">
+    <label class="btn primary big"><input type="file" id="cam" accept="image/*" capture="environment" hidden>ถ่ายภาพ</label>
+    {% if settings.allow_gallery %}<label class="btn big"><input type="file" id="gal" accept="image/*" multiple hidden>เลือกจากคลังภาพ</label>{% endif %}
+    <button type="button" class="btn big" id="webcam-open">ใช้เว็บแคมของเครื่องนี้</button>
+  </div>
+
+  <section class="panel webcam" id="webcam" hidden>
+    <div class="split" style="margin-bottom:10px"><h3>เว็บแคม</h3><button type="button" class="btn small quiet" id="webcam-close">ปิดกล้อง</button></div>
+    <p class="note red" id="webcam-error" hidden></p>
+    <video id="webcam-video" autoplay playsinline muted></video>
+    <div class="grid-2" style="margin-top:10px">
+      <label class="field"><span>กล้องที่ใช้</span><select id="webcam-device"></select></label>
+      <div class="field"><span>&nbsp;</span><button type="button" class="btn primary" id="webcam-shot">ถ่ายจากเว็บแคม</button></div>
+    </div>
+  </section>
+
+  {% if cams %}
+  <section class="panel">
+    <h3>กล้อง IP ที่ติดตั้งในพื้นที่</h3>
+    <ul class="cam-list">
+      {% for c in cams %}
+      <li><span><b>{{ c.name }}</b><br><span class="muted">{{ c.department.name }}, {{ c.area_name }}{% if c.mode == 'agent' %}, ผ่านเครื่องในโรงงาน{{ '' if agent_online else ' (ยังไม่เชื่อมต่อ)' }}{% endif %}</span></span>
+        <button type="button" class="btn small" data-cam="{{ c.id }}" data-cam-area="{{ c.area_name }}">ถ่ายจากกล้องนี้</button></li>
+      {% endfor %}
+    </ul>
+    <p id="cam-out" role="status" style="margin:10px 0 0" hidden></p>
+  </section>
+  {% endif %}
+
+  <div class="send-bar" id="sendbar" hidden><button class="btn primary big" id="send" type="button">ส่งภาพ</button></div>
+
+  <section class="panel panel-line">
+    <h3>ถ่ายอย่างไรให้ได้คะแนนตรงกับสภาพจริง</h3>
+    <ul class="tips">
+      <li>ถ่ายมุมกว้างให้เห็นพื้น ชั้นวาง และป้ายชี้บ่งในภาพเดียว</li>
+      <li>เปิดไฟให้สว่าง ถือกล้องให้นิ่ง ภาพเบลอหรือมืดจะไม่ถูกนำไปคิดคะแนน</li>
+      <li>ใส่ชื่อจุดตรวจให้ตรงกับที่เรียกกันในโรงงาน เช่น ชั้นวาง Jig หน้า Line 3</li>
+      <li>AI ไม่รู้ว่าภาพเป็นของแผนกใด และให้คะแนนจากสิ่งที่เห็นในภาพเท่านั้น</li>
+    </ul>
+  </section>
+</div>
+
+<datalist id="areas">{% for a in areas %}<option value="{{ a }}">{% endfor %}</datalist>
+<template id="card-tpl">
+  <article class="q-card">
+    <img alt="ภาพที่จะส่ง">
+    <div>
+      <label class="field"><span>ชื่อจุดตรวจ</span><input type="text" data-k="area_name" list="areas" maxlength="160" placeholder="เช่น ชั้นวาง Jig หน้า Line 3"></label>
+      <div class="grid-2">
+        <label class="field"><span>ประเภทพื้นที่</span><select data-k="area_type">{% for t in area_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
+        <label class="field"><span>หมายเหตุ <em>ไม่บังคับ</em></span><input type="text" data-k="note" maxlength="300"></label>
+      </div>
+      <div class="q-state"><span data-state>ยังไม่ได้ส่ง</span><button type="button" class="btn small quiet" data-remove>เอาภาพนี้ออก</button></div>
+    </div>
+  </article>
+</template>
+{% endif %}
+{% endblock %}

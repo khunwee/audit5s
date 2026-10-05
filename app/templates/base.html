@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}{% endblock %} | {{ APP_NAME }}</title>
+<meta name="theme-color" content="#1D2A2F">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css?v={{ APP_VERSION }}">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+</head>
+<body>
+<div class="tape" aria-hidden="true"></div>
+{% if user and not user.must_change %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">5ส</span><span class="brand-text">Vision<small>{{ org_name }}</small></span></a>
+  <nav class="nav" aria-label="เมนูหลัก">
+    <a href="/" class="{{ 'on' if path == '/' }}">หน้าแรก</a>
+    <a href="/capture" class="{{ 'on' if path.startswith('/capture') }}">ถ่ายภาพส่งตรวจ</a>
+    <a href="/photos" class="{{ 'on' if path.startswith('/photos') }}">ภาพและผลคะแนน</a>
+    <a href="/ranking" class="{{ 'on' if path.startswith('/ranking') or path.startswith('/rounds') or path.startswith('/trend') }}">อันดับ</a>
+    {% if manages(user) %}<a href="/admin" class="{{ 'on' if path.startswith('/admin') }}">จัดการระบบ{% if storage_level in ('warn', 'full') %} (พื้นที่ใกล้เต็ม){% endif %}</a>{% endif %}
+  </nav>
+  <details class="who">
+    <summary>{{ user.full_name or user.username }}</summary>
+    <div class="who-menu">
+      <p>{{ ROLES[user.role] }}{% if user.department %}, {{ user.department.name }}{% endif %}</p>
+      <a href="/account/password">เปลี่ยนรหัสผ่าน</a>
+      <form method="post" action="/logout"><button type="submit">ออกจากระบบ</button></form>
+    </div>
+  </details>
+</header>
+{% endif %}
+<main class="page">
+  {% for kind, message in flashes %}<div class="flash {{ kind }}" role="status">{{ message }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+{% if user and not user.must_change %}
+<nav class="tabbar" aria-label="เมนูหลัก">
+  <a href="/" class="{{ 'on' if path == '/' }}">หน้าแรก</a>
+  <a href="/photos" class="{{ 'on' if path.startswith('/photos') }}">ผลคะแนน</a>
+  <a href="/capture" class="shoot">ถ่ายภาพ</a>
+  <a href="/ranking" class="{{ 'on' if path.startswith('/ranking') or path.startswith('/rounds') }}">อันดับ</a>
+  {% if manages(user) %}<a href="/admin" class="{{ 'on' if path.startswith('/admin') }}">จัดการ</a>{% endif %}
+</nav>
+{% endif %}
+<script src="/static/app.js?v={{ APP_VERSION }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

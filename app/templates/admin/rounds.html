@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}รอบการตรวจ{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>รอบการตรวจ</h1><p>แต่ละรอบเก็บเกณฑ์ของตัวเอง ภาพทุกใบในรอบเดียวกันจึงถูกวัดด้วยมาตรฐานเดียวกัน</p></div></div>
+{% include "admin/_nav.html" %}
+<section class="panel">
+  <details class="edit add"{{ ' open' if not rounds }}>
+    <summary>สร้างรอบการตรวจใหม่</summary>
+    <form method="post" action="/admin/rounds/save">
+      <label class="field"><span>ชื่อรอบ</span><input type="text" name="name" required maxlength="160" placeholder="เช่น ตรวจ 5ส ประจำเดือนตุลาคม 2569"></label>
+      <div class="grid-2">
+        <label class="field"><span>วันเริ่ม</span><input type="date" name="start_date" value="{{ today }}"></label>
+        <label class="field"><span>วันสิ้นสุด</span><input type="date" name="end_date"></label>
+      </div>
+      <label class="field"><span>จำนวนภาพขั้นต่ำต่อแผนก <em>แผนกที่ภาพไม่ถึงจะยังไม่ถูกจัดอันดับ</em></span><input type="number" name="min_photos" value="3" min="1" max="200"></label>
+      <label class="field"><span>หมายเหตุ <em>ไม่บังคับ</em></span><textarea name="note" maxlength="1000"></textarea></label>
+      <p class="muted">รอบใหม่จะใช้เกณฑ์ชุดปัจจุบัน {{ n_criteria }} ข้อ <a href="/admin/criteria">ดูเกณฑ์</a></p>
+      <button class="btn primary">สร้างรอบการตรวจ</button>
+    </form>
+  </details>
+</section>
+
+{% if not rounds %}
+  <div class="empty" style="margin-top:16px"><h2>ยังไม่มีรอบการตรวจ</h2><p>สร้างรอบแรกจากแบบฟอร์มด้านบน</p></div>
+{% endif %}
+{% for r in rounds %}
+{% set st = stats.get(r.id, {'photos': 0, 'images': 0, 'bytes': 0}) %}
+<section class="panel" style="margin-top:14px">
+  <div class="split">
+    <div><h2>{{ r.name }}</h2>
+      <p class="muted" style="margin:2px 0 0">{{ r.start_date|d }} ถึง {{ r.end_date|d }}, ขั้นต่ำ {{ r.min_photos }} ภาพต่อแผนก, {{ st.photos }} ภาพ (เก็บภาพเต็ม {{ st.images }} ภาพ)
+        {% if r.last_backup_at %}, สำรองล่าสุด {{ r.last_backup_at|dt }}{% else %}, ยังไม่เคยสำรอง{% endif %}</p></div>
+    <span class="chip {{ 'chip-done' if r.status == 'open' else 'chip-plain' }}">{{ 'เปิดรับภาพ' if r.status == 'open' else 'ปิดรอบแล้ว' }}</span>
+  </div>
+  <div class="actions" style="margin-top:12px">
+    <a class="btn small" href="/ranking?round={{ r.id }}">ดูอันดับ</a>
+    <a class="btn small" href="/rounds/{{ r.id }}/report" target="_blank" rel="noopener">รายงานสำหรับพิมพ์</a>
+    {% if can(user, 'export') %}<a class="btn small" href="/rounds/{{ r.id }}/export/scores.xlsx">ส่งออก Excel</a>{% endif %}
+    {% if can(user, 'storage') %}<a class="btn small" href="/admin/rounds/{{ r.id }}/backup.zip">สำรองรอบนี้ (ZIP)</a>{% endif %}
+    {% if r.status == 'open' %}
+      <form method="post" action="/admin/rounds/{{ r.id }}/close" class="inline" data-confirm="ปิดรอบนี้ ระบบจะไม่รับภาพเพิ่ม (เปิดใหม่ได้ภายหลัง)"><button class="btn small">ปิดรอบ</button></form>
+    {% else %}
+      <form method="post" action="/admin/rounds/{{ r.id }}/reopen" class="inline"><button class="btn small">เปิดรอบอีกครั้ง</button></form>
+    {% endif %}
+  </div>
+  <details class="edit" style="margin-top:10px">
+    <summary><b>แก้ไขรอบ และคำสั่งอื่น</b></summary>
+    <form method="post" action="/admin/rounds/save">
+      <input type="hidden" name="id" value="{{ r.id }}">
+      <label class="field"><span>ชื่อรอบ</span><input type="text" name="name" value="{{ r.name }}" required maxlength="160"></label>
+      <div class="grid-2">
+        <label class="field"><span>วันเริ่ม</span><input type="date" name="start_date" value="{{ r.start_date or '' }}"></label>
+        <label class="field"><span>วันสิ้นสุด</span><input type="date" name="end_date" value="{{ r.end_date or '' }}"></label>
+      </div>
+      <label class="field"><span>จำนวนภาพขั้นต่ำต่อแผนก</span><input type="number" name="min_photos" value="{{ r.min_photos }}" min="1" max="200"></label>
+      <label class="field"><span>หมายเหตุ</span><textarea name="note" maxlength="1000">{{ r.note }}</textarea></label>
+      <button class="btn primary">บันทึกการแก้ไข</button>
+    </form>
+    <div class="inner">
+      <h3 style="margin:14px 0 8px">การวิเคราะห์</h3>
+      <div class="actions">
+        <form method="post" action="/admin/rounds/{{ r.id }}/retry-errors" class="inline"><button class="btn small">วิเคราะห์ภาพที่ผิดพลาดใหม่</button></form>
+        <form method="post" action="/admin/rounds/{{ r.id }}/reanalyze" class="inline" data-confirm="ให้ AI วิเคราะห์ทุกภาพของรอบนี้ใหม่ คะแนนที่กรรมการปรับไว้จะถูกแทนที่ และใช้โควตา AI เท่าจำนวนภาพ"><button class="btn small">วิเคราะห์ทุกภาพใหม่</button></form>
+        <form method="post" action="/admin/rounds/{{ r.id }}/sync-rubric" class="inline" data-confirm="เปลี่ยนเกณฑ์ของรอบนี้เป็นเกณฑ์ชุดล่าสุด แล้ววิเคราะห์ทุกภาพใหม่เพื่อให้ทุกแผนกใช้มาตรฐานเดียวกัน"><button class="btn small">ใช้เกณฑ์ล่าสุดกับรอบนี้</button></form>
+      </div>
+      {% if can(user, 'storage') %}
+      <h3 style="margin:14px 0 8px">ลบข้อมูล</h3>
+      <div class="actions">
+        <form method="post" action="/admin/rounds/{{ r.id }}/purge-images" class="inline" data-confirm="ลบภาพเต็ม {{ st.images }} ภาพของรอบนี้ ({{ st.bytes|mb }}) คะแนน คำอธิบาย และภาพย่อยังอยู่{{ '' if r.last_backup_at else ' รอบนี้ยังไม่เคยสำรอง ลบแล้วกู้ภาพคืนไม่ได้' }}"><button class="btn small danger">ลบภาพเต็มของรอบนี้</button></form>
+        <form method="post" action="/admin/rounds/{{ r.id }}/delete" class="inline" data-confirm="ลบรอบ {{ r.name }} พร้อมภาพและคะแนนทั้งหมด ลบแล้วกู้คืนไม่ได้ นอกจากมีไฟล์สำรอง"><button class="btn small danger">ลบทั้งรอบ</button></form>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+</section>
+{% endfor %}
+{% endblock %}

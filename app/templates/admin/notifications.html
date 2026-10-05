@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}การแจ้งเตือน{% endblock %}
+{% macro form(ch) %}
+<form method="post" action="/admin/notifications/save" class="channel-form" autocomplete="off">
+  {% if ch %}<input type="hidden" name="id" value="{{ ch.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>ชื่อช่องทาง <em>ตั้งให้รู้ว่าเป็นของใคร</em></span><input type="text" name="name" value="{{ ch.name if ch }}" required maxlength="120" placeholder="เช่น กลุ่ม LINE แผนกผลิต 1"></label>
+    <label class="field"><span>ส่งไปทาง</span>
+      <select name="kind" data-kind>{% for k, info in KINDS.items() %}<option value="{{ k }}"{{ ' selected' if ch and ch.kind == k }}>{{ info[0] }}</option>{% endfor %}</select></label>
+    <label class="field"><span>แจ้งเรื่องของแผนก</span>
+      <select name="department_id"><option value="">ทุกแผนก (เช่น กลุ่มกรรมการ 5ส)</option>{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if ch and ch.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+    {% if ch %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if ch.active }}>เปิดใช้</option><option value="0"{{ ' selected' if not ch.active }}>ปิดไว้ก่อน</option></select></label>{% endif %}
+  </div>
+  {% for k, info in KINDS.items() %}
+  <div data-for="{{ k }}" class="kind-fields">
+    {% for field, label, secret, hint in info[1] %}
+    {% set val = ch.config.get(field, '') if ch and ch.kind == k and ch.config else '' %}
+    <label class="field"><span>{{ label }} <em>{% if secret and val %}บันทึกไว้แล้ว เว้นว่างเพื่อใช้ค่าเดิม{% else %}{{ hint }}{% endif %}</em></span>
+      <input type="{{ 'password' if secret else 'text' }}" name="cfg_{{ k }}_{{ field }}" value="{{ '' if secret else val }}" maxlength="600" autocomplete="{{ 'new-password' if secret else 'off' }}"></label>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <fieldset class="perm-box">
+    <legend>เรื่องที่ต้องการแจ้ง</legend>
+    {% for e, label in EVENTS.items() %}
+    <label class="check"><input type="checkbox" name="ev_{{ e }}" value="1"{{ ' checked' if (ch and e in (ch.events or [])) or (not ch and e in ('result', 'round')) }}><span>{{ label }}</span></label>
+    {% endfor %}
+  </fieldset>
+  <button class="btn primary">{{ 'บันทึกช่องทาง' if ch else 'เพิ่มช่องทาง' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>การแจ้งเตือน</h1><p>แต่ละแผนกรับข่าวของตัวเองในช่องทางที่ใช้อยู่แล้ว ส่วนกรรมการรับของทุกแผนก</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  {% if not s.public_url %}<p class="note">ยังไม่ได้ใส่ที่อยู่เว็บของระบบ ข้อความแจ้งเตือนจะไม่มีลิงก์ให้กดเข้าไปดู <a href="/admin/settings">ใส่ในหน้าตั้งค่า</a></p>{% endif %}
+  <section class="panel">
+    {% for ch in items %}
+    <details class="edit">
+      <summary><span><b>{{ ch.name }}</b> <span class="muted">{{ KINDS[ch.kind][0] if ch.kind in KINDS else ch.kind }}, {{ ch.department.name if ch.department else 'ทุกแผนก' }}</span>
+        {% if not ch.active %} <span class="chip chip-plain">ปิดไว้</span>{% elif ch.last_error %} <span class="chip chip-error">ส่งครั้งล่าสุดไม่สำเร็จ</span>{% elif ch.last_ok_at %} <span class="chip chip-done">ส่งได้</span>{% else %} <span class="chip chip-plain">ยังไม่เคยส่ง</span>{% endif %}</span>
+        <span class="muted">{{ 'ส่งล่าสุด ' ~ (ch.last_ok_at|dt) if ch.last_ok_at else '' }}</span></summary>
+      {% if ch.last_error %}<p class="note red" style="margin:0 4px 10px">{{ ch.last_error }}</p>{% endif %}
+      {{ form(ch) }}
+      <div class="actions" style="padding:0 4px 14px">
+        <form method="post" action="/admin/notifications/{{ ch.id }}/test" class="inline"><button class="btn small">ส่งข้อความทดสอบ</button></form>
+        <form method="post" action="/admin/notifications/{{ ch.id }}/delete" class="inline" data-confirm="ลบช่องทาง {{ ch.name }}"><button class="btn small danger">ลบช่องทางนี้</button></form>
+      </div>
+    </details>
+    {% else %}
+    <div class="empty"><h2>ยังไม่มีช่องทางแจ้งเตือน</h2><p>เพิ่มช่องทางแรกจากแบบฟอร์มด้านล่าง แล้วกดส่งข้อความทดสอบ</p></div>
+    {% endfor %}
+    <details class="edit add"{{ ' open' if not items }}><summary>เพิ่มช่องทาง</summary>{{ form(none) }}</details>
+  </section>
+
+  <section class="panel panel-line">
+    <h3>ระบบส่งเมื่อไร</h3>
+    <ul class="tips">
+      <li>ภาพเข้าระบบ: รวมเป็นข้อความเดียวต่อแผนก ส่งหลังหยุดส่งภาพครบ 30 วินาที</li>
+      <li>ผลวิเคราะห์: ส่งเมื่อ AI วิเคราะห์ภาพของแผนกนั้นครบทั้งชุด พร้อมคะแนนรายจุดตรวจและสิ่งที่ควรทำก่อน</li>
+      <li>การรวมข้อความช่วยให้ไม่รบกวนกลุ่ม และไม่ชนโควตาข้อความฟรีรายเดือนของ LINE Official Account</li>
+      <li>บน host ฟรีอย่าง Render พอร์ต SMTP ถูกปิด อีเมลจึงต้องใช้แบบ Brevo API ส่วน SMTP ใช้ได้เมื่อรันระบบบนเครื่องในโรงงาน</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2 style="margin-bottom:8px">ประวัติการส่ง 60 รายการล่าสุด</h2>
+    {% if not logs %}<div class="empty"><p>ยังไม่มีการส่ง</p></div>{% else %}
+    <div class="table-wrap"><table>
+      <tr><th>เวลา</th><th>ช่องทาง</th><th>เรื่อง</th><th>ผล</th><th>รายละเอียด</th></tr>
+      {% for x in logs %}<tr><td style="white-space:nowrap">{{ x.at|dt }}</td><td>{{ x.channel }}</td><td>{{ EVENTS.get(x.kind, 'ทดสอบ' if x.kind == 'test' else x.kind) }}</td>
+        <td><span class="chip {{ 'chip-done' if x.ok else 'chip-error' }}">{{ 'ส่งแล้ว' if x.ok else 'ไม่สำเร็จ' }}</span></td><td>{{ x.detail }}</td></tr>{% endfor %}
+    </table></div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

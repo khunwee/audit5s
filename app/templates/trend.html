@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}แนวโน้มคะแนน{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>แนวโน้มคะแนนข้ามรอบ</h1><p>คะแนนเฉลี่ยของแต่ละแผนกใน {{ rounds|length }} รอบล่าสุด เรียงจากรอบเก่าไปใหม่</p></div>
+  <div class="actions no-print">
+    <a class="btn small quiet" href="/ranking">กลับไปอันดับ</a>
+    {% if can(user, 'export') %}<a class="btn small" href="/trend.csv">ส่งออก (.csv)</a>{% endif %}
+  </div>
+</div>
+{% if not rounds or not depts %}
+  <div class="empty"><h2>ยังไม่มีข้อมูลพอให้เทียบ</h2><p>แนวโน้มจะขึ้นเมื่อมีรอบการตรวจที่ภาพได้รับคะแนนแล้ว</p></div>
+{% else %}
+<div class="table-wrap"><table class="trend">
+  <tr><th>แผนก</th>{% for r in rounds %}<th class="r"><a href="/ranking?round={{ r.id }}">{{ r.name }}</a></th>{% endfor %}<th class="r">เปลี่ยนแปลง</th></tr>
+  {% for d in depts %}
+  {% set row = table.get(d.id, {}) %}
+  {% set vals = [] %}{% for r in rounds %}{% if row.get(r.id) and row[r.id].avg is not none %}{% set _ = vals.append(row[r.id].avg) %}{% endif %}{% endfor %}
+  <tr>
+    <td><b>{{ d.name }}</b></td>
+    {% for r in rounds %}{% set c = row.get(r.id) %}
+    <td class="r">{% if c and c.avg is not none %}<a href="/rounds/{{ r.id }}/dept/{{ d.id }}">{{ m.tag(c.avg) }}</a>{% if c.rank %}<br><span class="muted">อันดับ {{ c.rank }}</span>{% else %}<br><span class="muted">ภาพไม่ครบ</span>{% endif %}{% else %}<span class="muted">ไม่ส่งภาพ</span>{% endif %}</td>
+    {% endfor %}
+    <td class="r num">{% if vals|length > 1 %}{% set dlt = vals[-1] - vals[0] %}<span class="{{ 'delta-up' if dlt >= 0 else 'delta-down' }}">{{ '+' if dlt >= 0 }}{{ dlt|num }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<p class="muted" style="margin-top:8px">ช่องเปลี่ยนแปลงเทียบรอบล่าสุดกับรอบแรกที่แผนกมีคะแนนในตารางนี้ แต่ละรอบอาจใช้เกณฑ์ต่างชุดกัน ถ้าผู้ดูแลแก้เกณฑ์ระหว่างรอบ</p>
+{% endif %}
+{% endblock %}

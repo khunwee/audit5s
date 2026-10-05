@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}กล้อง{% endblock %}
+{% macro form(c) %}
+<form method="post" action="/admin/cameras/save" autocomplete="off">
+  {% if c %}<input type="hidden" name="id" value="{{ c.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>ชื่อกล้อง</span><input type="text" name="name" value="{{ c.name if c }}" required maxlength="120" placeholder="เช่น กล้องคลังสินค้า ประตู 2"></label>
+    <label class="field"><span>แผนกเจ้าของพื้นที่</span><select name="department_id" required>{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if c and c.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+    <label class="field"><span>ชื่อจุดตรวจที่กล้องนี้เห็น</span><input type="text" name="area_name" value="{{ c.area_name if c }}" maxlength="160" placeholder="เช่น โซนรับสินค้า"></label>
+    <label class="field"><span>ประเภทพื้นที่</span><select name="area_type">{% for t in area_types %}<option value="{{ t }}"{{ ' selected' if c and c.area_type == t }}>{{ t }}</option>{% endfor %}</select></label>
+    <label class="field"><span>ใครเป็นคนดึงภาพจากกล้อง</span>
+      <select name="mode">
+        <option value="agent"{{ ' selected' if c and c.mode == 'agent' }}>โปรแกรมบนเครื่องในโรงงาน (ระบบอยู่บน cloud)</option>
+        <option value="direct"{{ ' selected' if c and c.mode == 'direct' }}>เซิร์ฟเวอร์ของระบบดึงเอง (ระบบรันในโรงงาน)</option>
+      </select></label>
+    <label class="field"><span>ชนิดลิงก์ของกล้อง</span>
+      <select name="source">
+        <option value="snapshot"{{ ' selected' if not c or c.source == 'snapshot' }}>ภาพนิ่ง HTTP (snapshot หรือ MJPEG)</option>
+        <option value="rtsp"{{ ' selected' if c and c.source == 'rtsp' }}>สตรีม RTSP (ต้องติดตั้ง OpenCV)</option>
+      </select></label>
+  </div>
+  <label class="field"><span>ลิงก์ของกล้อง <em>ดูในคู่มือของกล้อง เช่น http://192.168.1.50/cgi-bin/snapshot.cgi หรือ rtsp://192.168.1.50:554/stream1</em></span>
+    <input type="text" name="url" value="{{ c.url if c }}" required maxlength="1000"></label>
+  <div class="grid-2">
+    <label class="field"><span>ชื่อผู้ใช้ของกล้อง <em>ไม่บังคับ</em></span><input type="text" name="username" value="{{ c.username if c }}" maxlength="120" autocomplete="off"></label>
+    <label class="field"><span>รหัสผ่านของกล้อง <em>{{ 'บันทึกไว้แล้ว เว้นว่างเพื่อใช้ค่าเดิม' if c and c.password else 'ไม่บังคับ' }}</em></span><input type="password" name="password" maxlength="200" autocomplete="new-password"></label>
+    <label class="field"><span>วิธียืนยันตัวตน (ลิงก์ HTTP)</span><select name="auth"><option value="basic"{{ ' selected' if not c or c.auth == 'basic' }}>Basic</option><option value="digest"{{ ' selected' if c and c.auth == 'digest' }}>Digest (กล้องรุ่นใหม่ส่วนใหญ่)</option></select></label>
+    {% if c %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if c.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not c.active }}>ปิดใช้</option></select></label>{% endif %}
+  </div>
+  <button class="btn primary">{{ 'บันทึกกล้อง' if c else 'เพิ่มกล้อง' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>กล้อง</h1><p>ระบบรับภาพได้จากกล้องมือถือ เว็บแคม และกล้อง IP ที่ติดตั้งในพื้นที่</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <section class="panel panel-line">
+    <h3>แหล่งภาพที่ใช้ได้</h3>
+    <ul class="tips">
+      <li>กล้องมือถือและแท็บเล็ต: ปุ่ม ถ่ายภาพ ในหน้าถ่ายภาพส่งตรวจ ไม่ต้องตั้งค่าอะไร</li>
+      <li>เว็บแคมของคอมพิวเตอร์หรือกล้อง USB: ปุ่ม ใช้เว็บแคมของเครื่องนี้ เบราว์เซอร์อนุญาตเฉพาะเมื่อเปิดระบบผ่าน https หรือ localhost</li>
+      <li>กล้อง IP: ลงทะเบียนในหน้านี้ ผู้ที่มีสิทธิ์ สั่งถ่ายจากกล้อง IP จะเห็นปุ่มถ่ายในหน้าถ่ายภาพส่งตรวจ หรือให้โปรแกรมถ่ายตามเวลาโดยอัตโนมัติ</li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <h2>กล้อง IP ที่ลงทะเบียน</h2>
+    {% if not depts %}<p class="note">ยังไม่มีแผนก <a href="/admin/departments">เพิ่มแผนก</a>ก่อนลงทะเบียนกล้อง</p>{% else %}
+    {% for c in items %}
+    <details class="edit">
+      <summary><span><b>{{ c.name }}</b> <span class="muted">{{ c.department.name }}, {{ c.area_name }}, {{ 'ผ่านเครื่องในโรงงาน' if c.mode == 'agent' else 'เซิร์ฟเวอร์ดึงเอง' }}</span>
+        {% if not c.active %} <span class="chip chip-plain">ปิดใช้</span>{% elif c.last_error %} <span class="chip chip-error">ถ่ายครั้งล่าสุดไม่สำเร็จ</span>{% endif %}</span>
+        <span class="muted">{{ 'ถ่ายล่าสุด ' ~ (c.last_capture_at|dt) if c.last_capture_at else 'ยังไม่เคยถ่าย' }}</span></summary>
+      {% if c.last_error %}<p class="note red" style="margin:0 4px 10px">{{ c.last_error }}</p>{% endif %}
+      {{ form(c) }}
+      <div class="actions" style="padding:0 4px 14px">
+        {% if c.mode == 'direct' %}<a class="btn small" href="/admin/cameras/{{ c.id }}/test.jpg" target="_blank" rel="noopener">ทดสอบดึงภาพ</a>{% endif %}
+        <form method="post" action="/admin/cameras/{{ c.id }}/delete" class="inline" data-confirm="ลบกล้อง {{ c.name }} ภาพที่ถ่ายไว้ยังอยู่"><button class="btn small danger">ลบกล้องนี้</button></form>
+      </div>
+    </details>
+    {% else %}<div class="empty"><p>ยังไม่มีกล้อง IP เพิ่มกล้องแรกจากแบบฟอร์มด้านล่าง</p></div>
+    {% endfor %}
+    <details class="edit add"><summary>เพิ่มกล้อง IP</summary>{{ form(none) }}</details>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="split"><h2>โปรแกรมกล้องบนเครื่องในโรงงาน</h2>
+      <span class="chip {{ 'chip-done' if agent_online else 'chip-plain' }}">{{ 'เชื่อมต่ออยู่' if agent_online else 'ไม่ได้เชื่อมต่อ' }}</span></div>
+    <p>ระบบบน cloud มองไม่เห็นกล้องในเครือข่ายโรงงาน จึงใช้โปรแกรมเล็ก ๆ ชื่อ <b>tools/camera_agent.py</b> รันบนคอมพิวเตอร์ในโรงงานเครื่องหนึ่ง โปรแกรมจะดึงภาพจากกล้องแล้วส่งขึ้นมาให้</p>
+    {% if token %}
+    <label class="field"><span>รหัสของโปรแกรมกล้อง <em>เก็บเป็นความลับ ใครมีรหัสนี้ส่งภาพเข้าระบบได้</em></span><input type="text" value="{{ token }}" readonly onclick="this.select()"></label>
+    <p class="muted">ถ่ายทุกกล้องตามเวลาที่กำหนด (แนะนำ ไม่ทำให้ host ฟรีตื่นตลอดเวลา)</p>
+    <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }} --times 09:30,14:30</pre>
+    <p class="muted">สุ่มเวลาถ่ายวันละ 2 ครั้งในช่วงเวลางาน แผนกจะเตรียมพื้นที่ล่วงหน้าไม่ได้</p>
+    <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }} --random 2 --between 08:30-16:30</pre>
+    <p class="muted">รับคำสั่งถ่ายจากปุ่มในหน้าเว็บด้วย (โปรแกรมจะถามระบบทุก 20 วินาทีในช่วงเวลาที่กำหนด)</p>
+    <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }} --times 09:30,14:30 --listen 08:00-17:00</pre>
+    {% else %}<p class="note">ยังไม่ได้สร้างรหัสของโปรแกรมกล้อง</p>{% endif %}
+    <form method="post" action="/admin/cameras/token" {% if token %}data-confirm="สร้างรหัสใหม่ รหัสเดิมจะใช้ไม่ได้ ต้องนำรหัสใหม่ไปใส่ในเครื่องที่รันโปรแกรม"{% endif %}><button class="btn small">{{ 'สร้างรหัสใหม่' if token else 'สร้างรหัสของโปรแกรมกล้อง' }}</button></form>
+  </section>
+</div>
+{% endblock %}

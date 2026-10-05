@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}เกณฑ์การให้คะแนน{% endblock %}
+{% macro form(c) %}
+<form method="post" action="/admin/criteria/save">
+  {% if c %}<input type="hidden" name="id" value="{{ c.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>รหัส <em>สั้น ๆ ไม่ซ้ำกัน เช่น S1</em></span><input type="text" name="code" value="{{ c.code if c }}" required maxlength="12"></label>
+    <label class="field"><span>คะแนนเต็ม</span><input type="number" name="max_score" value="{{ c.max_score|num if c else 20 }}" min="1" max="1000" step="any" required></label>
+  </div>
+  <label class="field"><span>ชื่อเกณฑ์</span><input type="text" name="name" value="{{ c.name if c }}" required maxlength="120"></label>
+  <label class="field"><span>สิ่งที่ต้องดูในภาพ</span><textarea name="focus" maxlength="1500">{{ c.focus if c }}</textarea></label>
+  {% for lv in range(4, -1, -1) %}
+  <label class="field"><span>ระดับ {{ lv }} <em>{{ 'ได้คะแนนเต็ม' if lv == 4 else 'ได้ 0 คะแนน' if lv == 0 else 'ได้ ' ~ (lv * 25) ~ '% ของคะแนนเต็ม' }}</em></span>
+    <textarea name="level{{ lv }}" maxlength="600" required>{{ c.levels[lv] if c and c.levels and c.levels|length > lv }}</textarea></label>
+  {% endfor %}
+  <div class="grid-2">
+    <label class="field"><span>ลำดับการแสดง</span><input type="number" name="sort_order" value="{{ c.sort_order if c else 100 }}"></label>
+    <div>
+      <label class="check"><input type="checkbox" name="active" value="1"{{ ' checked' if not c or c.active }}><span>เปิดใช้เกณฑ์นี้</span></label>
+      <label class="check"><input type="checkbox" name="allow_na" value="1"{{ ' checked' if c and c.allow_na }}><span>ให้ AI ข้ามได้เมื่อภาพไม่มีหลักฐานพอ <em class="muted">(เกณฑ์ที่ข้ามจะไม่นำมาคิดทั้งคะแนนและคะแนนเต็มของภาพนั้น)</em></span></label>
+    </div>
+  </div>
+  <div class="form-foot"><button class="btn primary">{{ 'บันทึกเกณฑ์' if c else 'เพิ่มเกณฑ์' }}</button></div>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>เกณฑ์การให้คะแนน</h1><p>คะแนนเต็มรวมของเกณฑ์ที่เปิดใช้: <span class="num">{{ total|num }}</span> คะแนน</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <p class="note blue">AI จะอ่านคำอธิบายระดับ 0 ถึง 4 ของแต่ละเกณฑ์ แล้วเลือกระดับที่ตรงกับภาพ ยิ่งเขียนให้นับได้และมองเห็นได้ (เช่น จำนวนจุดที่พบ) คะแนนยิ่งสม่ำเสมอ
+    การแก้เกณฑ์มีผลกับรอบที่สร้างใหม่ ถ้าต้องการใช้กับรอบที่เปิดอยู่ ให้กด ใช้เกณฑ์ล่าสุดกับรอบนี้ ในหน้ารอบการตรวจ มาตรฐานเฉพาะของโรงงานที่ใช้กับทุกเกณฑ์ ใส่ได้ที่หน้าตั้งค่าและ AI</p>
+  <section class="panel">
+    {% for c in items %}
+    <details class="edit">
+      <summary><span><b>{{ c.code }} {{ c.name }}</b>{% if not c.active %} <span class="chip chip-plain">ปิดใช้</span>{% endif %}{% if c.allow_na %} <span class="chip chip-plain">ข้ามได้</span>{% endif %}</span><span class="num">เต็ม {{ c.max_score|num }}</span></summary>
+      {{ form(c) }}
+      <form method="post" action="/admin/criteria/{{ c.id }}/delete" data-confirm="ลบเกณฑ์ {{ c.name }} รอบที่ตรวจไปแล้วยังใช้เกณฑ์ชุดเดิม" style="padding:0 4px 14px"><button class="btn small danger">ลบเกณฑ์นี้</button></form>
+    </details>
+    {% else %}<div class="empty"><p>ยังไม่มีเกณฑ์ เพิ่มเกณฑ์ใหม่ หรือคืนค่าเกณฑ์ตั้งต้น 5ส</p></div>
+    {% endfor %}
+    <details class="edit add"><summary>เพิ่มเกณฑ์ใหม่</summary>{{ form(none) }}</details>
+  </section>
+  <form method="post" action="/admin/criteria/reset" data-confirm="ลบเกณฑ์ทั้งหมดแล้วแทนด้วยเกณฑ์ตั้งต้น 5ส จำนวน 5 ข้อ ข้อละ 20 คะแนน"><button class="btn small quiet">คืนค่าเกณฑ์ตั้งต้น 5ส</button></form>
+</div>
+{% endblock %}

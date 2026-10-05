@@ -1,0 +1,21 @@
+# Render Blueprint: New > Blueprint แล้วเลือก repository นี้
+services:
+  - type: web
+    name: fives-vision
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DATABASE_URL        # connection string จาก Neon (แบบ pooled)
+        sync: false
+      - key: ADMIN_PASSWORD      # รหัสผ่านเริ่มต้นของ admin (ระบบบังคับเปลี่ยนตอนเข้าครั้งแรก)
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "1"

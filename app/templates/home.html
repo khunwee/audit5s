@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}หน้าแรก{% endblock %}
+{% block content %}
+{% if not rnd %}
+  <div class="empty">
+    <h2>ยังไม่มีรอบการตรวจ 5ส</h2>
+    {% if manages(user) %}
+      <p>เริ่มจากเพิ่มแผนก ตรวจเกณฑ์ ตั้งค่า AI แล้วสร้างรอบการตรวจรอบแรก</p>
+      <a class="btn primary" href="/admin">ไปหน้าจัดการระบบ</a>
+    {% else %}<p>รอผู้ดูแลระบบเปิดรอบการตรวจ แล้วกลับมาส่งภาพที่หน้านี้</p>{% endif %}
+  </div>
+{% else %}
+<div class="stack">
+  <section class="hero">
+    <div>
+      <h1>{{ rnd.name }}</h1>
+      <p>{% if rnd.status == 'open' %}เปิดรับภาพ{% if rnd.end_date %}ถึง {{ rnd.end_date|d }}{% endif %}{% else %}ปิดรอบแล้วเมื่อ {{ rnd.closed_at|d }}{% endif %}
+         แต่ละแผนกต้องมีภาพที่ให้คะแนนแล้วอย่างน้อย {{ rnd.min_photos }} ภาพจึงจะถูกจัดอันดับ</p>
+      <div class="hero-meta" style="margin-top:12px">
+        <span><b>{{ ranking.photo_count }}</b> ภาพในรอบนี้</span>
+        <span><b>{{ ranking.ranked|length }}</b> แผนกถูกจัดอันดับแล้ว</span>
+        <span>คะแนนเต็ม <b>{{ ranking.full_score|num }}</b></span>
+      </div>
+    </div>
+    {% if can_upload %}<a class="btn primary big" href="/capture">ถ่ายภาพส่งตรวจ</a>{% endif %}
+  </section>
+
+  {% if not ai_ready %}
+  <p class="note">ยังไม่ได้ตั้งค่า AI ภาพที่ส่งจะรออยู่ในคิวจนกว่าจะตั้งค่า{% if user.role == 'admin' %} <a href="/admin/settings">ตั้งค่า AI</a>{% endif %}</p>
+  {% endif %}
+
+  {% if mine %}
+  <section class="panel panel-line">
+    <h2>แผนกของคุณ: {{ mine.dept.name }}</h2>
+    <div class="mine">
+      {{ m.tag(mine.avg, true) }}
+      <dl class="facts">
+        {% if show_rank %}<div><dt>อันดับ</dt><dd>{{ mine.rank if mine.rank else 'ยังไม่จัด' }}</dd></div>{% endif %}
+        <div><dt>ภาพที่ให้คะแนนแล้ว</dt><dd>{{ mine.scored }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        <div><dt>รอวิเคราะห์</dt><dd>{{ mine.waiting }}</dd></div>
+        {% if mine.rejected or mine.errors %}<div><dt>ต้องถ่ายใหม่หรือมีปัญหา</dt><dd>{{ mine.rejected + mine.errors }}</dd></div>{% endif %}
+      </dl>
+    </div>
+    {% if mine.scored < rnd.min_photos %}<p style="margin-top:10px">ส่งภาพอีก {{ rnd.min_photos - mine.scored }} ภาพเพื่อเข้าการจัดอันดับ</p>{% endif %}
+    <div class="actions" style="margin-top:10px"><a class="btn small" href="/rounds/{{ rnd.id }}/dept/{{ mine.dept.id }}">ดูรายงานและคำแนะนำของแผนก</a></div>
+  </section>
+  {% endif %}
+
+  <div class="cols cols-side">
+    <section>
+      <div class="split" style="margin-bottom:10px"><h2>อันดับล่าสุด</h2>{% if show_rank %}<span><a href="/ranking?round={{ rnd.id }}">ดูทั้งหมด</a>, <a href="/trend">แนวโน้ม</a></span>{% endif %}</div>
+      {% if not show_rank %}
+        <div class="empty"><p>อันดับของรอบนี้จะเปิดให้ดูเมื่อปิดรอบการตรวจ</p></div>
+      {% elif not ranking.ranked %}
+        <div class="empty"><p>ยังไม่มีแผนกที่ภาพครบ {{ rnd.min_photos }} ภาพ อันดับจะขึ้นที่นี่เมื่อ AI ให้คะแนนแล้ว</p></div>
+      {% else %}
+        <ol class="rank-list">
+        {% for r in ranking.ranked[:5] %}
+          <li><a class="rank-row{{ ' top' if r.rank <= 3 }}" href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}" style="grid-template-columns:52px 1fr auto">
+            <span class="rank-no">{{ r.rank }}</span>
+            <span><span class="rank-name">{{ r.dept.name }}</span><br><span class="rank-sub">{{ r.scored }} ภาพ</span></span>
+            {{ m.tag(r.avg) }}
+          </a></li>
+        {% endfor %}
+        </ol>
+      {% endif %}
+    </section>
+    <section>
+      <div class="split" style="margin-bottom:10px"><h2>ภาพล่าสุด</h2><a href="/photos?round={{ rnd.id }}">ดูทั้งหมด</a></div>
+      {% if recent %}
+      <div class="photo-grid" style="grid-template-columns:repeat(2,1fr)">
+        {% for p in recent %}
+        <a class="photo-card" href="/photos/{{ p.id }}">
+          <span class="shot"><img src="/photos/{{ p.id }}/thumb" alt="" loading="lazy">{% if p.status == 'done' %}{{ m.tag(p.percent) }}{% endif %}</span>
+          <span class="cap"><b>{{ p.area_name }}</b><span class="muted">{{ p.department.name }}</span>{% if p.status != 'done' %}<span>{{ m.chip(p) }}</span>{% endif %}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}<div class="empty"><p>ยังไม่มีภาพในรอบนี้</p>{% if can_upload %}<a class="btn primary" href="/capture">ถ่ายภาพแรก</a>{% endif %}</div>{% endif %}
+    </section>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

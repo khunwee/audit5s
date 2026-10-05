@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}ผู้ใช้และสิทธิ์{% endblock %}
+{% macro form(u) %}
+<form method="post" action="/admin/users/save" autocomplete="off">
+  {% if u %}<input type="hidden" name="id" value="{{ u.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>ชื่อผู้ใช้ <em>สำหรับเข้าสู่ระบบ</em></span><input type="text" name="username" value="{{ u.username if u }}" required maxlength="50" autocapitalize="none"></label>
+    <label class="field"><span>ชื่อที่แสดง</span><input type="text" name="full_name" value="{{ u.full_name if u }}" maxlength="120"></label>
+    <label class="field"><span>บทบาท <em>กำหนดสิทธิ์ตั้งต้น</em></span><select name="role" data-role>{% for k, v in ROLES.items() %}<option value="{{ k }}"{{ ' selected' if (u and u.role == k) or (not u and k == 'member') }}>{{ v }}</option>{% endfor %}</select></label>
+    <label class="field"><span>แผนกหลัก <em>จำเป็นสำหรับตัวแทนแผนก</em></span><select name="department_id"><option value="">ไม่ระบุ</option>{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if u and u.department_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+  </div>
+  <label class="field"><span>{{ 'ตั้งรหัสผ่านใหม่' if u else 'รหัสผ่านเริ่มต้น' }} <em>{{ 'เว้นว่างถ้าไม่เปลี่ยน, ' if u }}อย่างน้อย 8 ตัว มีทั้งตัวอักษรและตัวเลข ผู้ใช้ต้องตั้งรหัสของตัวเองเมื่อเข้าครั้งแรก</em></span>
+    <input type="text" name="password" {{ 'required' if not u }} minlength="8" autocomplete="off"></label>
+  {% if u %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if u.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not u.active }}>ระงับการใช้งาน</option></select></label>{% endif %}
+
+  <fieldset class="perm-box" data-perms>
+    <legend>สิทธิ์ของบัญชีนี้</legend>
+    <p class="muted" data-admin-note hidden>ผู้ดูแลระบบทำได้ทุกอย่าง ไม่ต้องตั้งสิทธิ์ทีละข้อ</p>
+    <div data-perm-rows>
+      {% if depts %}
+      <div class="perm-row">
+        <span><b>แผนกเพิ่มเติม</b><br><span class="muted">ส่งภาพและดูผลได้เหมือนแผนกหลัก เช่น หัวหน้าที่ดูแลสองแผนก</span></span>
+        <span class="perm-depts">{% for d in depts %}<label><input type="checkbox" name="extra_depts" value="{{ d.id }}"{{ ' checked' if u and d.id in (u.extra_depts or []) }}> {{ d.name }}</label>{% endfor %}</span>
+      </div>
+      {% endif %}
+      {% for key, info in PERMS.items() %}
+      {% set cur = (u.perms or {}).get(key) if u else none %}
+      <label class="perm-row">
+        <span><b>{{ info[0] }}</b>{% if info[1] %}<br><span class="muted">{{ info[1] }}</span>{% endif %}</span>
+        <select name="perm_{{ key }}" data-perm="{{ key }}">
+          <option value="">ตามบทบาท</option>
+          <option value="1"{{ ' selected' if cur is sameas true }}>อนุญาต</option>
+          <option value="0"{{ ' selected' if cur is sameas false }}>ไม่อนุญาต</option>
+        </select>
+      </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <button class="btn primary">{{ 'บันทึกผู้ใช้' if u else 'เพิ่มผู้ใช้' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>ผู้ใช้และสิทธิ์</h1><p>บทบาทให้สิทธิ์ตั้งต้น แล้วเปิดหรือปิดสิทธิ์ทีละข้อให้แต่ละบัญชีได้</p></div></div>
+{% include "admin/_nav.html" %}
+<section class="panel" id="users" data-role-perms='{{ role_perms|tojson }}'>
+  {% for u in items %}
+  <details class="edit">
+    <summary><span><b>{{ u.full_name or u.username }}</b> <span class="muted">{{ u.username }}, {{ ROLES[u.role] }}{% if u.department %}, {{ u.department.name }}{% endif %}</span>
+      {% if not u.active %} <span class="chip chip-plain">ระงับ</span>{% endif %}{% if u.must_change %} <span class="chip chip-plain">ยังไม่ตั้งรหัสเอง</span>{% endif %}
+      {% if u.role != 'admin' and (u.perms or u.extra_depts) %} <span class="chip chip-pending">ตั้งสิทธิ์เฉพาะบัญชี</span>{% endif %}</span>
+      <span class="muted">{{ 'เข้าล่าสุด ' ~ (u.last_login|dt) if u.last_login else 'ยังไม่เคยเข้า' }}</span></summary>
+    {{ form(u) }}
+  </details>
+  {% endfor %}
+  <details class="edit add"><summary>เพิ่มผู้ใช้</summary>
+    {% if not depts %}<p class="note" style="margin:0 4px 10px">ยังไม่มีแผนก <a href="/admin/departments">เพิ่มแผนก</a>ก่อนสร้างบัญชีตัวแทนแผนก</p>{% endif %}
+    {{ form(none) }}</details>
+</section>
+<section class="panel" style="margin-top:14px">
+  <h2>สิทธิ์ตั้งต้นของแต่ละบทบาท</h2>
+  <div class="table-wrap" style="border:0"><table class="roles">
+    <tr><th>สิทธิ์</th>{% for k, v in ROLES.items() %}<th>{{ v }}</th>{% endfor %}</tr>
+    {% for key, info in PERMS.items() %}<tr><td>{{ info[0] }}</td>{% for k in ROLES %}<td>{{ 'ได้' if key in role_perms[k] else '-' }}</td>{% endfor %}</tr>{% endfor %}
+    <tr><td>จัดการผู้ใช้ ตั้งค่าระบบ การแจ้งเตือน และกล้อง</td>{% for k in ROLES %}<td>{{ 'ได้' if k == 'admin' else '-' }}</td>{% endfor %}</tr>
+  </table></div>
+</section>
+{% endblock %}

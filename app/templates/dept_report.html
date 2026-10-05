@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}รายงาน {{ dept.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ dept.name }}</h1><p>รายงาน 5ส {{ rnd.name }}</p></div>
+  <div class="actions no-print">
+    <button class="btn small" type="button" onclick="window.print()">พิมพ์หรือบันทึกเป็น PDF</button>
+    {% if can(user, 'export') %}<a class="btn small" href="/rounds/{{ rnd.id }}/export/photos.csv?dept={{ dept.id }}">ส่งออกรายภาพ (.csv)</a>{% endif %}
+    {% if show_rank %}<a class="btn small quiet" href="/ranking?round={{ rnd.id }}">กลับไปอันดับ</a>{% endif %}
+  </div>
+</div>
+<div class="stack">
+  <section class="panel panel-line">
+    <div class="mine">
+      {{ m.tag(row.avg if row else none, true) }}
+      <dl class="facts">
+        {% if show_rank %}<div><dt>อันดับ</dt><dd>{{ row.rank if row and row.rank else 'ยังไม่จัด' }}</dd></div>{% endif %}
+        <div><dt>ภาพที่ให้คะแนนแล้ว</dt><dd>{{ row.scored if row else 0 }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        {% if row and row.low is not none %}<div><dt>ภาพต่ำสุด</dt><dd>{{ row.low|num }}%</dd></div><div><dt>ภาพสูงสุด</dt><dd>{{ row.high|num }}%</dd></div>{% endif %}
+        {% if row and row.delta is not none %}<div><dt>เทียบรอบก่อน</dt><dd class="{{ 'delta-up' if row.delta >= 0 else 'delta-down' }}">{{ '+' if row.delta >= 0 }}{{ row.delta|num }}</dd></div>{% endif %}
+      </dl>
+    </div>
+  </section>
+
+  {% if row and row.scored %}
+  <div class="cols cols-2">
+    <section class="panel">
+      <h2>คะแนนเฉลี่ยรายเกณฑ์</h2>
+      {% for c in ranking.rubric %}
+      <div class="crit"><div class="crit-head"><h3>{{ c.name }}</h3><span class="crit-score">{{ row.crit[c.code]|num }}{{ '%' if row.crit[c.code] is not none }}</span></div>{{ m.bar(row.crit[c.code]) }}</div>
+      {% endfor %}
+    </section>
+    <section class="panel">
+      <h2>สิ่งที่ควรทำก่อน</h2>
+      {% if summary and summary.content %}
+        <p>{{ summary.content.overview }}</p>
+        {% if summary.content.strengths %}<span class="crit lbl" style="border:0;padding:0">จุดแข็ง</span><ul class="tips">{% for x in summary.content.strengths %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+        {% if summary.content.priorities %}<ol class="todo" style="margin-top:8px">{% for x in summary.content.priorities %}<li><b>{{ x.issue }}</b>{% if x.where and x.where != '-' %} ({{ x.where }}){% endif %}<br>{{ x.action }}</li>{% endfor %}</ol>{% endif %}
+        <p class="muted" style="margin-top:8px">สรุปโดย AI จากผลของทุกภาพ เมื่อ {{ summary.created_at|dt }}</p>
+      {% elif actions %}
+        <ol class="todo">{% for x in actions %}<li>{{ x.text }} <a class="no-print" href="/photos/{{ x.photo.id }}">({{ x.photo.area_name }})</a></li>{% endfor %}</ol>
+        <p class="muted" style="margin-top:8px">รวมจากคำแนะนำของภาพที่คะแนนต่ำก่อน</p>
+      {% else %}<p class="muted">ยังไม่มีคำแนะนำ</p>{% endif %}
+      {% if can(user, 'score') %}
+      <form method="post" action="/admin/rounds/{{ rnd.id }}/dept/{{ dept.id }}/summarize" class="no-print" style="margin-top:10px">
+        <button class="btn small">{{ 'ให้ AI สรุปใหม่' if summary else 'ให้ AI สรุปคำแนะนำของแผนก' }}</button> <span class="muted">ใช้โควตา AI 1 ครั้ง</span>
+      </form>
+      {% endif %}
+    </section>
+  </div>
+  {% endif %}
+
+  <section>
+    <h2 style="margin-bottom:10px">ภาพทั้งหมดของแผนก เรียงจากคะแนนต่ำไปสูง</h2>
+    {% if not photos %}
+      <div class="empty"><p>แผนกนี้ยังไม่ส่งภาพในรอบนี้</p></div>
+    {% else %}
+    <div class="report" style="padding:0;max-width:none">
+      {% for p in photos %}
+      <div class="panel photo-row" style="border:1.5px solid var(--line);margin-bottom:10px;padding:14px">
+        <a href="/photos/{{ p.id }}"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}"></a>
+        <div>
+          <div class="split"><h3>{{ p.area_name }}</h3>{% if p.status == 'done' %}{{ m.tag(p.percent) }}{% endif %}</div>
+          <p class="muted">ภาพเลขที่ {{ p.id }}, ส่งเมื่อ {{ p.created_at|dt }} โดย {{ p.uploader_name or '-' }} {{ m.chip(p) }}{% if p.id in old %} <span class="chip chip-plain">มีภาพหลังแก้ไขแล้ว ไม่นำมาเฉลี่ย</span>{% endif %}{% if p.after_of %} <span class="chip chip-done">ภาพหลังแก้ไขของภาพ {{ p.after_of }}</span>{% endif %}</p>
+          {{ m.analysis(p, true) }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

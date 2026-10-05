@@ -1,0 +1,14 @@
+{
+  "name": "5ส Vision",
+  "short_name": "5ส Vision",
+  "description": "ตรวจประเมิน 5ส ด้วยภาพถ่ายและ AI",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E7EAE4",
+  "theme_color": "#1D2A2F",
+  "lang": "th",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -1,0 +1,70 @@
+{% import "_macros.html" as m %}<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายงาน 5ส {{ rnd.name }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<style>{{ css|safe }}
+body { background: #fff; padding-bottom: 0; }</style>
+</head>
+<body>
+<div class="tape" aria-hidden="true"></div>
+<div class="report">
+  <header class="report-head">
+    <p class="muted" style="margin:0">{{ org_name }}</p>
+    <h1>รายงานผลการตรวจ 5ส: {{ rnd.name }}</h1>
+    <p style="margin:6px 0 0">ช่วงเวลา {{ rnd.start_date|d }} ถึง {{ rnd.end_date|d }}, สถานะ {{ 'ปิดรอบแล้ว' if rnd.status == 'closed' else 'ยังเปิดรับภาพ' }},
+      คะแนนเต็ม {{ ranking.full_score|num }}, ภาพขั้นต่ำต่อแผนก {{ rnd.min_photos }}, ออกรายงานเมื่อ {{ generated|dt }}</p>
+    <p class="no-print" style="margin:10px 0 0"><button class="btn small" onclick="window.print()">พิมพ์หรือบันทึกเป็น PDF</button></p>
+  </header>
+
+  <section>
+    <h2 style="margin-bottom:8px">อันดับ</h2>
+    <div class="table-wrap"><table>
+      <tr><th>อันดับ</th><th>แผนก</th><th class="r">คะแนนเฉลี่ย</th><th class="r">จำนวนภาพ</th><th class="r">ต่ำสุด</th><th class="r">สูงสุด</th>{% for c in ranking.rubric %}<th class="r">{{ c.name|short }}</th>{% endfor %}</tr>
+      {% for r in ranking.ranked %}
+      <tr><td class="num">{{ r.rank }}</td><td>{{ r.dept.name }}</td><td class="r">{{ m.tag(r.avg) }}</td><td class="r">{{ r.scored }}</td><td class="r">{{ r.low|num }}%</td><td class="r">{{ r.high|num }}%</td>{% for c in ranking.rubric %}<td class="r">{{ r.crit[c.code]|num(0) }}{{ '%' if r.crit[c.code] is not none }}</td>{% endfor %}</tr>
+      {% endfor %}
+      {% for r in ranking.unranked %}
+      <tr><td>ภาพไม่ครบ</td><td>{{ r.dept.name }}</td><td class="r">{{ r.avg|num }}{{ '%' if r.avg is not none }}</td><td class="r">{{ r.scored }}</td><td class="r">{{ r.low|num }}</td><td class="r">{{ r.high|num }}</td>{% for c in ranking.rubric %}<td class="r">{{ r.crit[c.code]|num(0) }}</td>{% endfor %}</tr>
+      {% endfor %}
+      {% if not ranking.ranked and not ranking.unranked %}<tr><td colspan="{{ 6 + ranking.rubric|length }}">ยังไม่มีภาพในรอบนี้</td></tr>{% endif %}
+    </table></div>
+    {% if ranking.idle %}<p class="muted" style="margin-top:8px">ไม่ส่งภาพ: {% for r in ranking.idle %}{{ r.dept.name }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+  </section>
+
+  <section>
+    <h2 style="margin-bottom:8px">เกณฑ์ที่ใช้ในรอบนี้</h2>
+    <div class="table-wrap"><table>
+      <tr><th>เกณฑ์</th><th class="r">คะแนนเต็ม</th><th>สิ่งที่ต้องดู</th></tr>
+      {% for c in ranking.rubric %}<tr><td>{{ c.name }}</td><td class="r">{{ c.max|num }}</td><td>{{ c.focus }}</td></tr>{% endfor %}
+    </table></div>
+    <p class="muted" style="margin-top:8px">AI ให้ระดับ 0 ถึง 4 ต่อเกณฑ์ ระบบแปลงเป็นคะแนนตามคะแนนเต็ม คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว</p>
+  </section>
+
+  {% for r in ranking.ranked + ranking.unranked %}
+  <section class="dept-block">
+    <div class="split" style="border-bottom:2px solid var(--ink);padding-bottom:8px">
+      <h2>{% if r.rank %}อันดับ {{ r.rank }}: {% endif %}{{ r.dept.name }}</h2>{{ m.tag(r.avg) }}
+    </div>
+    {% set sm = summaries.get(r.dept.id) %}
+    {% if sm and sm.content %}
+      <p style="margin-top:10px">{{ sm.content.overview }}</p>
+      {% if sm.content.priorities %}<ol class="todo">{% for x in sm.content.priorities %}<li><b>{{ x.issue }}</b>: {{ x.action }}</li>{% endfor %}</ol>{% endif %}
+    {% endif %}
+    {% for p in by.get(r.dept.id, []) %}
+    <div class="photo-row">
+      {% if img(p) %}<img src="{{ img(p) }}" alt="ภาพจุดตรวจ {{ p.area_name }}">{% else %}<div class="muted">ไม่มีไฟล์ภาพ</div>{% endif %}
+      <div>
+        <div class="split"><h3>{{ p.area_name }}</h3>{% if p.status == 'done' %}<span class="num">{{ p.score|num }} / {{ p.max_score|num }} ({{ p.percent|num }}%)</span>{% endif %}</div>
+        <p class="muted" style="margin:0">ภาพเลขที่ {{ p.id }}, {{ area_label(p.area_type) }}, ส่งเมื่อ {{ p.created_at|dt }} โดย {{ p.uploader_name or '-' }} {{ m.chip(p) }}</p>
+        {{ m.analysis(p, true) }}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
+</body>
+</html>

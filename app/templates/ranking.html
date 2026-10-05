@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}อันดับ 5ส{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>อันดับ 5ส</h1>{% if rnd %}<p>{{ rnd.name }}{% if rnd.start_date %}, {{ rnd.start_date|d }} ถึง {{ rnd.end_date|d }}{% endif %}{{ ', ปิดรอบแล้ว' if rnd.status == 'closed' else ', ยังเปิดรับภาพ อันดับอาจเปลี่ยน' }}</p>{% endif %}</div>
+  {% if rnd and allowed %}
+  <div class="actions no-print">
+    <a class="btn small quiet" href="/trend">แนวโน้มข้ามรอบ</a>
+    <a class="btn small" href="/rounds/{{ rnd.id }}/report" target="_blank" rel="noopener">รายงานสำหรับพิมพ์</a>
+    {% if can(user, 'export') %}
+    <details class="menu">
+      <summary class="btn small">ส่งออกข้อมูล</summary>
+      <div class="menu-list">
+        <a href="/rounds/{{ rnd.id }}/export/scores.xlsx">Excel พร้อมภาพย่อ (.xlsx)</a>
+        <a href="/rounds/{{ rnd.id }}/export/ranking.csv">ตารางอันดับ (.csv)</a>
+        <a href="/rounds/{{ rnd.id }}/export/photos.csv">คะแนนและเหตุผลรายภาพ (.csv)</a>
+        <a href="/rounds/{{ rnd.id }}/export/data.json">ข้อมูลทั้งรอบสำหรับระบบอื่น (.json)</a>
+        <a href="/rounds/{{ rnd.id }}/report" target="_blank" rel="noopener">รายงานพร้อมรูป บันทึกเป็น PDF จากหน้าพิมพ์</a>
+        {% if can(user, 'storage') %}<a href="/admin/rounds/{{ rnd.id }}/backup.zip">ไฟล์สำรองพร้อมรูปทั้งหมด (.zip)</a>{% endif %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% if not rnd %}
+  <div class="empty"><h2>ยังไม่มีรอบการตรวจ</h2><p>อันดับจะขึ้นที่หน้านี้เมื่อมีรอบการตรวจและภาพได้รับคะแนนแล้ว</p></div>
+{% else %}
+<form method="get" class="filters no-print" data-autosubmit>
+  <label class="field"><span>รอบการตรวจ</span><select name="round">{% for r in rounds %}<option value="{{ r.id }}"{{ ' selected' if r.id == rnd.id }}>{{ r.name }}{{ ' (ปิดแล้ว)' if r.status == 'closed' }}</option>{% endfor %}</select></label>
+</form>
+{% if not allowed %}
+  <div class="empty"><h2>อันดับของรอบนี้ยังไม่เปิดให้ดู</h2><p>ผู้ดูแลระบบตั้งให้แสดงอันดับเมื่อปิดรอบการตรวจแล้ว</p></div>
+{% else %}
+<div class="stack">
+  {% if not ranking.ranked %}
+    <div class="empty"><h2>ยังไม่มีแผนกที่ถูกจัดอันดับ</h2><p>แผนกต้องมีภาพที่ให้คะแนนแล้วอย่างน้อย {{ rnd.min_photos }} ภาพ</p></div>
+  {% else %}
+  <ol class="rank-list">
+    {% for r in ranking.ranked %}
+    <li><a class="rank-row{{ ' top' if r.rank <= 3 }}" href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">
+      <span class="rank-no">{{ r.rank }}</span>
+      <span>
+        <span class="rank-name">{{ r.dept.name }}</span><br>
+        <span class="rank-sub">{{ r.scored }} ภาพ, ต่ำสุด {{ r.low|num }}% สูงสุด {{ r.high|num }}%
+          {% if r.delta is not none %}<span class="{{ 'delta-up' if r.delta >= 0 else 'delta-down' }}">{{ 'เพิ่มขึ้น' if r.delta >= 0 else 'ลดลง' }} {{ r.delta|abs|num }} จากรอบก่อน</span>{% endif %}
+          {% if r.overridden %}, กรรมการปรับ {{ r.overridden }} ภาพ{% endif %}{% if r.replaced %}, แก้ไขแล้ว {{ r.replaced }} จุด{% endif %}</span>
+      </span>
+      <span class="rank-crit">{% for c in ranking.rubric %}<span title="{{ c.name }}">{{ c.name|short }} {{ r.crit[c.code]|num(0) }}%{{ m.bar(r.crit[c.code]) }}</span>{% endfor %}</span>
+      {{ m.tag(r.avg) }}
+    </a></li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+
+  {% if ranking.unranked %}
+  <section>
+    <h2 style="margin-bottom:8px">ภาพยังไม่ครบ {{ rnd.min_photos }} ภาพ</h2>
+    <div class="table-wrap"><table>
+      <tr><th>แผนก</th><th class="r">ให้คะแนนแล้ว</th><th class="r">รอวิเคราะห์</th><th class="r">ใช้ไม่ได้หรือผิดพลาด</th><th class="r">คะแนนเฉลี่ยตอนนี้</th></tr>
+      {% for r in ranking.unranked %}
+      <tr><td><a href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">{{ r.dept.name }}</a></td><td class="r">{{ r.scored }}</td><td class="r">{{ r.waiting }}</td><td class="r">{{ r.rejected + r.errors }}</td><td class="r">{{ r.avg|num }}{{ '%' if r.avg is not none }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+  {% endif %}
+  {% if ranking.idle %}
+  <p class="muted">ยังไม่ส่งภาพในรอบนี้: {% for r in ranking.idle %}{{ r.dept.name }}{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+
+  <section class="panel panel-line">
+    <h3>คะแนนคิดอย่างไร</h3>
+    <ul class="tips">
+      <li>AI ให้ระดับ 0 ถึง 4 ในแต่ละเกณฑ์ตามคำอธิบายระดับที่ผู้ดูแลตั้งไว้ แล้วระบบแปลงเป็นคะแนนตามคะแนนเต็มของเกณฑ์นั้น</li>
+      <li>คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว ส่งภาพมากจึงไม่ได้เปรียบ แต่ภาพที่คะแนนต่ำจะดึงค่าเฉลี่ยลง</li>
+      <li>ถ้าคะแนนเฉลี่ยเท่ากัน แผนกที่ภาพคะแนนต่ำสุดสูงกว่าจะอยู่อันดับดีกว่า</li>
+      <li>ทุกภาพในรอบเดียวกันใช้เกณฑ์ชุดเดียวกัน และ AI ไม่ทราบว่าภาพเป็นของแผนกใด</li>
+      {% if settings.after_replaces %}<li>จุดที่ส่งภาพหลังแก้ไขแล้ว ระบบนับเฉพาะภาพล่าสุดของจุดนั้น การแก้ไขจริงจึงเห็นผลในคะแนนทันที</li>{% endif %}
+    </ul>
+  </section>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

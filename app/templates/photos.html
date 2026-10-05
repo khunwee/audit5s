@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}ภาพและผลคะแนน{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>ภาพและผลคะแนน</h1>{% if rnd %}<p>{{ rnd.name }}, พบ {{ total }} ภาพ</p>{% endif %}</div></div>
+{% if not rnd %}
+  <div class="empty"><h2>ยังไม่มีรอบการตรวจ</h2><p>ภาพจะขึ้นที่หน้านี้เมื่อมีรอบการตรวจและมีการส่งภาพ</p></div>
+{% else %}
+<form method="get" class="filters" data-autosubmit>
+  <label class="field"><span>รอบการตรวจ</span><select name="round">{% for r in rounds %}<option value="{{ r.id }}"{{ ' selected' if r.id == rnd.id }}>{{ r.name }}</option>{% endfor %}</select></label>
+  <label class="field"><span>แผนก</span><select name="dept">{% if depts|length != 1 %}<option value="0">ทุกแผนก</option>{% endif %}{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if d.id == dept }}>{{ d.name }}</option>{% endfor %}</select></label>
+  <label class="field"><span>สถานะ</span><select name="status">
+    <option value="">ทุกสถานะ</option>
+    <option value="done"{{ ' selected' if status == 'done' }}>ให้คะแนนแล้ว</option>
+    <option value="waiting"{{ ' selected' if status == 'waiting' }}>รอ AI วิเคราะห์</option>
+    <option value="rejected"{{ ' selected' if status == 'rejected' }}>ภาพใช้ประเมินไม่ได้</option>
+    <option value="error"{{ ' selected' if status == 'error' }}>วิเคราะห์ไม่สำเร็จ</option>
+    <option value="review"{{ ' selected' if status == 'review' }}>ควรให้กรรมการตรวจ</option>
+    <option value="override"{{ ' selected' if status == 'override' }}>กรรมการปรับคะแนนแล้ว</option>
+  </select></label>
+  <noscript><button class="btn">แสดง</button></noscript>
+</form>
+{% if not items %}
+  <div class="empty"><h2>ไม่มีภาพตามเงื่อนไขนี้</h2><p>ลองเปลี่ยนแผนกหรือสถานะ หรือส่งภาพใหม่</p>{% if rnd.status == 'open' %}<a class="btn primary" href="/capture">ถ่ายภาพส่งตรวจ</a>{% endif %}</div>
+{% else %}
+<div class="photo-grid">
+  {% for p in items %}
+  <a class="photo-card" href="/photos/{{ p.id }}">
+    <span class="shot"><img src="/photos/{{ p.id }}/thumb" alt="" loading="lazy">{% if p.status == 'done' %}{{ m.tag(p.percent) }}{% endif %}</span>
+    <span class="cap"><b>{{ p.area_name }}</b><span class="muted">{{ p.department.name }}</span>
+      {% if p.status != 'done' or p.overridden or p.review_flag %}<span>{{ m.chip(p) }}</span>{% endif %}</span>
+  </a>
+  {% endfor %}
+</div>
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn small" href="?round={{ rnd.id }}&dept={{ dept }}&status={{ status }}&page={{ page - 1 }}">ก่อนหน้า</a>{% endif %}
+  <span>หน้า {{ page }} จาก {{ pages }}</span>
+  {% if page < pages %}<a class="btn small" href="?round={{ rnd.id }}&dept={{ dept }}&status={{ status }}&page={{ page + 1 }}">ถัดไป</a>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}

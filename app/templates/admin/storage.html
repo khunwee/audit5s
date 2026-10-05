@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}พื้นที่และสำรองข้อมูล{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>พื้นที่และสำรองข้อมูล</h1><p>สำรองรอบเก่าเก็บไว้นอกระบบ แล้วลบภาพเต็มเพื่อคืนพื้นที่</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <section class="panel">
+    <h2>การใช้พื้นที่</h2>
+    <div class="meter {{ usage.level }}" role="img" aria-label="ใช้พื้นที่ {{ usage.pct }} เปอร์เซ็นต์"><span style="width: {{ usage.pct }}%"></span></div>
+    <dl class="facts" style="margin-top:12px">
+      <div><dt>ใช้อยู่</dt><dd>{{ usage.logical|mb }}</dd></div>
+      <div><dt>งบพื้นที่</dt><dd>{{ usage.budget|mb }}</dd></div>
+      <div><dt>ภาพเต็มที่เก็บ</dt><dd>{{ usage.images }} ภาพ</dd></div>
+      <div><dt>ขนาดเฉลี่ยต่อภาพ</dt><dd>{{ usage.avg_image|mb }}</dd></div>
+      {% if usage.physical is not none %}<div><dt>ขนาดไฟล์ฐานข้อมูลจริง</dt><dd>{{ usage.physical|mb }}</dd></div>{% endif %}
+    </dl>
+    {% if usage.avg_image %}<p class="muted" style="margin-top:8px">พื้นที่ที่เหลือเก็บภาพได้อีกประมาณ {{ ((usage.budget - usage.logical) / (usage.avg_image + 20000))|int if usage.budget > usage.logical else 0 }} ภาพ</p>{% endif %}
+    {% if usage.level == 'full' %}<p class="note red">พื้นที่เต็ม ระบบหยุดรับภาพใหม่ สำรองรอบเก่าแล้วลบภาพเต็มด้านล่าง</p>{% endif %}
+    <p class="muted">นโยบายปัจจุบัน: {% if s.retention_days %}ลบภาพเต็มที่เก่ากว่า {{ s.retention_days }} วัน{% else %}ไม่ลบตามอายุ{% endif %},
+      ลบภาพเก่าสุดเมื่อใช้พื้นที่เกิน 90%{{ ', เฉพาะภาพที่สำรองแล้ว' if s.purge_requires_backup else ', แม้ยังไม่สำรอง' }}. ระบบตรวจทุก 6 ชั่วโมง <a href="/admin/settings">แก้นโยบาย</a></p>
+    <form method="post" action="/admin/storage/cleanup" data-confirm="ลบภาพเต็มที่เข้าเงื่อนไขตามนโยบายตอนนี้เลย"><button class="btn small">ลบตามนโยบายตอนนี้</button></form>
+    {% if not is_sqlite %}<p class="muted" style="margin-top:8px">บน Postgres พื้นที่ที่ลบแล้วจะถูกนำกลับมาใช้กับภาพใหม่โดยอัตโนมัติ ขนาดไฟล์ฐานข้อมูลจริงจึงไม่ลดลงทันที แต่จะไม่โตขึ้นอีก</p>{% endif %}
+  </section>
+
+  <section>
+    <h2 style="margin-bottom:8px">สำรองและลบภาพรายรอบ</h2>
+    {% if not rounds %}<div class="empty"><p>ยังไม่มีรอบการตรวจ</p></div>{% else %}
+    <div class="table-wrap"><table>
+      <tr><th>รอบ</th><th class="r">ภาพ</th><th class="r">ภาพเต็มที่เก็บ</th><th class="r">ขนาด</th><th>สำรองล่าสุด</th><th></th></tr>
+      {% for r in rounds %}{% set st = stats.get(r.id, {'images': 0, 'bytes': 0}) %}
+      <tr>
+        <td>{{ r.name }}<br><span class="muted">{{ 'เปิดรับภาพ' if r.status == 'open' else 'ปิดแล้ว' }}</span></td>
+        <td class="r">{{ totals.get(r.id, 0) }}</td><td class="r">{{ st.images }}</td><td class="r">{{ st.bytes|mb }}</td>
+        <td>{% if r.last_backup_at %}{{ r.last_backup_at|dt }}{% if newer.get(r.id) %}<br><span class="chip chip-rejected">มีภาพใหม่ {{ newer[r.id] }} ภาพหลังสำรอง</span>{% endif %}{% else %}<span class="chip chip-error">ยังไม่เคยสำรอง</span>{% endif %}</td>
+        <td>
+          <a class="btn small" href="/admin/rounds/{{ r.id }}/backup.zip">ดาวน์โหลดไฟล์สำรอง</a>
+          {% if st.images %}<form method="post" action="/admin/rounds/{{ r.id }}/purge-images" class="inline" data-confirm="ลบภาพเต็ม {{ st.images }} ภาพของรอบ {{ r.name }} คะแนน คำอธิบาย และภาพย่อยังอยู่{{ '' if r.last_backup_at and not newer.get(r.id) else ' มีภาพที่ยังไม่ได้สำรอง ลบแล้วกู้ภาพคืนไม่ได้' }}"><button class="btn small danger">ลบภาพเต็ม</button></form>{% endif %}
+        </td>
+      </tr>{% endfor %}
+    </table></div>
+    <p class="muted" style="margin-top:8px">ไฟล์สำรองเป็น ZIP ที่เปิดดูได้เลย: มีรายงานพร้อมรูป (report.html), คะแนนทุกภาพ (scores.xlsx) และรูปแยกโฟลเดอร์ตามแผนก เก็บไว้ใน Google Drive หรือเซิร์ฟเวอร์ของโรงงาน</p>
+    {% endif %}
+  </section>
+
+  <div class="cols cols-2">
+    <section class="panel">
+      <h2>นำรอบที่สำรองไว้กลับเข้าระบบ</h2>
+      <p class="muted">เลือกไฟล์ ZIP ที่ดาวน์โหลดจากหน้านี้ ระบบจะสร้างเป็นรอบที่ปิดแล้ว พร้อมภาพและคะแนนเดิม</p>
+      <form method="post" action="/admin/restore" enctype="multipart/form-data">
+        <label class="field"><span>ไฟล์สำรองของรอบ (.zip)</span><input type="file" name="file" accept=".zip,application/zip" required style="padding:8px"></label>
+        <button class="btn">นำรอบนี้กลับเข้าระบบ</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>สำรองข้อมูลทั้งระบบ (ไม่มีรูป)</h2>
+      <p class="muted">ไฟล์ JSON รวมแผนก ผู้ใช้ เกณฑ์ การตั้งค่า และคะแนนกับคำอธิบายของทุกรอบ ไม่มีรหัสผ่านและไม่มี API key ขนาดเล็ก เหมาะกับการสำรองประจำสัปดาห์</p>
+      <a class="btn" href="/admin/backup/system.json">ดาวน์โหลดข้อมูลทั้งระบบ</a>
+    </section>
+  </div>
+</div>
+{% endblock %}

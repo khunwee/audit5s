@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}บันทึกการใช้งาน{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>บันทึกการใช้งาน</h1><p>300 รายการล่าสุด รวมการปรับคะแนน การลบ และการสำรองข้อมูล</p></div></div>
+{% include "admin/_nav.html" %}
+{% if not items %}<div class="empty"><p>ยังไม่มีรายการ</p></div>{% else %}
+<div class="table-wrap"><table>
+  <tr><th>เวลา</th><th>ผู้ใช้</th><th>รายการ</th><th>รายละเอียด</th></tr>
+  {% for x in items %}<tr><td style="white-space:nowrap">{{ x.at|dt }}</td><td>{{ x.username }}</td><td>{{ x.action }}</td><td>{{ x.detail }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

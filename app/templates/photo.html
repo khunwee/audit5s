@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ p.area_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ p.area_name }}</h1><p>{{ p.department.name }}, {{ rnd.name }}</p></div>
+  <div class="actions no-print"><a class="btn small quiet" href="/photos?round={{ rnd.id }}&dept={{ p.department_id }}">กลับไปรายการภาพ</a></div>
+</div>
+<div class="photo-view" {% if p.status in ('pending', 'processing') %}data-poll="{{ p.id }}"{% endif %}>
+  <div class="stack">
+    <div class="shot"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}"></div>
+    <section class="panel">
+      <dl class="meta-list">
+        <dt>ภาพเลขที่</dt><dd>{{ p.id }}</dd>
+        <dt>ประเภทพื้นที่</dt><dd>{{ area_label(p.area_type) }}</dd>
+        <dt>แหล่งภาพ</dt><dd>{{ SOURCES.get(p.source or 'mobile', '-') }}</dd>
+        <dt>ผู้ส่ง</dt><dd>{{ p.uploader_name or '-' }}</dd>
+        <dt>ส่งเมื่อ</dt><dd>{{ p.created_at|dt }}</dd>
+        {% if p.note %}<dt>หมายเหตุ</dt><dd>{{ p.note }}</dd>{% endif %}
+        {% if p.analyzed_at %}<dt>วิเคราะห์เมื่อ</dt><dd>{{ p.analyzed_at|dt }}</dd><dt>โมเดล</dt><dd>{{ p.model or '-' }}</dd>{% endif %}
+        {% if not p.has_image %}<dt>ไฟล์ภาพ</dt><dd>ภาพเต็มถูกลบตามนโยบายพื้นที่เมื่อ {{ p.purged_at|d }} เหลือภาพย่อ</dd>{% endif %}
+      </dl>
+    </section>
+  </div>
+  <div class="stack">
+    <section class="panel">
+      <div class="score-head">
+        {{ m.tag(p.percent if p.status == 'done' else none, true) }}
+        <div>{% if p.status == 'done' %}<span class="of">{{ p.score|num }} / {{ p.max_score|num }} คะแนน</span><br>{% endif %}{{ m.chip(p) }}</div>
+      </div>
+      {% if p.review_flag %}<p class="note" style="margin-top:12px">AI ประเมินภาพนี้สองรอบแล้วได้ผลต่างกันมาก ระบบยึดระดับที่ต่ำกว่าไว้ก่อน ควรให้กรรมการดูภาพแล้วยืนยันหรือปรับคะแนน</p>{% endif %}
+      {% if before or after or can_fix %}
+      <div class="pair">
+        {% if before %}<a href="/photos/{{ before.id }}"><img src="/photos/{{ before.id }}/thumb" alt=""><span>ก่อนแก้ไข{% if before.percent is not none %} {{ before.percent|num }}%{% endif %}</span></a>{% endif %}
+        {% if after %}<a href="/photos/{{ after.id }}"><img src="/photos/{{ after.id }}/thumb" alt=""><span>หลังแก้ไข{% if after.percent is not none %} {{ after.percent|num }}%{% endif %}</span></a>{% endif %}
+        {% if before and before.percent is not none and p.percent is not none %}<p class="{{ 'delta-up' if p.percent >= before.percent else 'delta-down' }}">{{ 'ดีขึ้น' if p.percent >= before.percent else 'ลดลง' }} {{ (p.percent - before.percent)|abs|num }} จุดจากภาพก่อนแก้ไข</p>{% endif %}
+        {% if can_fix and not after and p.status in ('done', 'rejected') %}<a class="btn small no-print" href="/capture?after={{ p.id }}">ส่งภาพหลังแก้ไขของจุดนี้</a>{% endif %}
+      </div>
+      {% endif %}
+      {% if p.provider == 'demo' %}<p class="note red" style="margin-top:12px">คะแนนนี้มาจากโหมดทดลอง ไม่ใช่ AI จริง ห้ามใช้จัดอันดับ</p>{% endif %}
+    </section>
+    <section class="panel">
+      <h2>เหตุผลและคำแนะนำรายเกณฑ์</h2>
+      {{ m.analysis(p) }}
+      {% set a = p.analysis or {} %}
+      {% if p.status == 'done' and a.top_actions %}
+      <div class="crit"><h3>ควรทำก่อน</h3><ol class="todo">{% for x in a.top_actions %}<li>{{ x }}</li>{% endfor %}</ol></div>
+      {% endif %}
+    </section>
+
+    {% if can(user, 'score') %}
+    <section class="panel no-print">
+      <h2>สำหรับกรรมการ</h2>
+      <div class="actions">
+        <form method="post" action="/admin/photos/{{ p.id }}/reanalyze" class="inline"><button class="btn small"{{ ' disabled' if not p.has_image }}>ให้ AI วิเคราะห์ใหม่</button></form>
+        {% if p.review_flag %}<form method="post" action="/admin/photos/{{ p.id }}/accept" class="inline"><button class="btn small">ยืนยันคะแนนนี้</button></form>{% endif %}
+      </div>
+      <details class="edit" style="margin-top:8px">
+        <summary><b>ปรับคะแนนด้วยกรรมการ</b></summary>
+        <form method="post" action="/admin/photos/{{ p.id }}/override">
+          <p class="muted">ใช้เมื่อ AI ประเมินพลาดอย่างชัดเจน ระบบจะเก็บคะแนนเดิมของ AI และแสดงในรายงานว่าภาพนี้ถูกปรับ</p>
+          {% set cur = {} %}{% for c in a.criteria or [] %}{% set _ = cur.update({c.code: c}) %}{% endfor %}
+          {% for c in rnd.rubric %}
+          <label class="field"><span>{{ c.name }} <em>เต็ม {{ c.max|num }}</em></span>
+            <select name="level_{{ c.code }}" required>
+              <option value="">เลือกระดับ</option>
+              {% for lv in range(4, -1, -1) %}<option value="{{ lv }}"{{ ' selected' if cur.get(c.code) and not cur[c.code].na and cur[c.code].level == lv }}>ระดับ {{ lv }}: {{ c.levels[lv] }}</option>{% endfor %}
+              {% if c.allow_na %}<option value="na"{{ ' selected' if cur.get(c.code) and cur[c.code].na }}>ภาพนี้ไม่มีหลักฐานพอให้ประเมิน</option>{% endif %}
+            </select></label>
+          {% endfor %}
+          <label class="field"><span>เหตุผลที่ปรับ</span><textarea name="note" required minlength="5" maxlength="1000"></textarea></label>
+          <button class="btn primary">บันทึกคะแนนที่ปรับ</button>
+        </form>
+      </details>
+      {% if a.ai_original and a.ai_original.criteria %}
+      <p class="muted" style="margin-top:8px">คะแนนเดิมจาก AI: {{ a.ai_original.score|num }} / {{ a.ai_original.max|num }} ({{ a.ai_original.percent|num }}%)</p>
+      {% endif %}
+    </section>
+    {% endif %}
+    {% if deletable %}
+    <form method="post" action="/photos/{{ p.id }}/delete" class="no-print" data-confirm="ลบภาพนี้และคะแนนของภาพออกจากรอบการตรวจ ลบแล้วกู้คืนไม่ได้"><button class="btn danger small">ลบภาพนี้</button></form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

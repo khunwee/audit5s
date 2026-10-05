@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}เข้าสู่ระบบ{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="brand"><span class="brand-mark">5ส</span><span class="brand-text">Vision<small>{{ org_name }}</small></span></div>
+  <form method="post" action="/login" class="panel">
+    <h1 style="font-size:1.3rem;margin-bottom:14px">เข้าสู่ระบบ</h1>
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="field"><span>ชื่อผู้ใช้</span><input type="text" name="username" autocomplete="username" autocapitalize="none" required autofocus></label>
+    <label class="field"><span>รหัสผ่าน</span><input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="btn primary big" style="width:100%">เข้าสู่ระบบ</button>
+  </form>
+  <p class="foot">ลืมรหัสผ่าน ติดต่อผู้ดูแลระบบ 5ส ของโรงงาน</p>
+</div>
+{% endblock %}

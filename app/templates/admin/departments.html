@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}แผนก{% endblock %}
+{% macro form(d) %}
+<form method="post" action="/admin/departments/save">
+  {% if d %}<input type="hidden" name="id" value="{{ d.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>รหัสแผนก <em>ตัวอักษรอังกฤษหรือตัวเลข</em></span><input type="text" name="code" value="{{ d.code if d }}" required maxlength="20" placeholder="เช่น PRD1"></label>
+    <label class="field"><span>ชื่อแผนก</span><input type="text" name="name" value="{{ d.name if d }}" required maxlength="120" placeholder="เช่น ผลิต 1"></label>
+  </div>
+  <label class="field"><span>อาคารหรือโซน <em>ไม่บังคับ</em></span><input type="text" name="zone" value="{{ d.zone if d }}" maxlength="120"></label>
+  {% if d %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if d.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not d.active }}>ปิดการใช้งาน</option></select></label>{% endif %}
+  <button class="btn primary">{{ 'บันทึกแผนก' if d else 'เพิ่มแผนก' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>แผนก</h1><p>แผนกที่เข้าร่วมกิจกรรม 5ส และถูกนำมาจัดอันดับ</p></div></div>
+{% include "admin/_nav.html" %}
+<section class="panel">
+  {% for d in items %}
+  <details class="edit">
+    <summary><span><b>{{ d.name }}</b> <span class="muted">{{ d.code }}{% if d.zone %}, {{ d.zone }}{% endif %}</span>{% if not d.active %} <span class="chip chip-plain">ปิดการใช้งาน</span>{% endif %}</span><span class="muted">{{ counts.get(d.id, 0) }} ภาพ</span></summary>
+    {{ form(d) }}
+    <form method="post" action="/admin/departments/{{ d.id }}/delete" data-confirm="ลบแผนก {{ d.name }} ถ้าแผนกมีภาพในระบบจะถูกปิดการใช้งานแทน" style="padding:0 4px 14px"><button class="btn small danger">ลบแผนก</button></form>
+  </details>
+  {% else %}<div class="empty"><h2>ยังไม่มีแผนก</h2><p>เพิ่มแผนกแรกจากแบบฟอร์มด้านล่าง</p></div>
+  {% endfor %}
+  <details class="edit add"{{ ' open' if not items }}><summary>เพิ่มแผนก</summary>{{ form(none) }}</details>
+</section>
+{% endblock %}

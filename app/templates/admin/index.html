@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}จัดการระบบ{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>จัดการระบบ</h1></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  {% if user.role == 'admin' and (n_depts == 0 or open_rounds == 0 or not ai_ready) %}
+  <section class="panel panel-line">
+    <h2>ขั้นตอนเริ่มใช้งาน</h2>
+    <ol class="todo">
+      <li>{{ 'เสร็จแล้ว: ' if n_depts }}<a href="/admin/departments">เพิ่มแผนก</a>ที่เข้าร่วมกิจกรรม 5ส</li>
+      <li><a href="/admin/users">สร้างบัญชีผู้ใช้</a>ให้ตัวแทนแผนกและกรรมการ</li>
+      <li><a href="/admin/criteria">ตรวจเกณฑ์การให้คะแนน</a>และคะแนนเต็มให้ตรงกับของโรงงาน</li>
+      <li>{{ 'เสร็จแล้ว: ' if ai_ready }}<a href="/admin/settings">ตั้งค่า AI</a>ด้วย API key ฟรี แล้วกดทดสอบ</li>
+      <li>{{ 'เสร็จแล้ว: ' if n_channels }}<a href="/admin/notifications">ตั้งช่องทางแจ้งเตือน</a>ของแต่ละแผนก (ไม่บังคับ)</li>
+      <li>{{ 'เสร็จแล้ว: ' if open_rounds }}<a href="/admin/rounds">สร้างรอบการตรวจ</a>แล้วแจ้งทุกแผนกให้เริ่มส่งภาพ</li>
+    </ol>
+  </section>
+  {% endif %}
+
+  <div class="cols cols-2">
+    <section class="panel">
+      <h2>คิววิเคราะห์ภาพ</h2>
+      <dl class="facts">
+        <div><dt>รอวิเคราะห์</dt><dd>{{ counts.get('pending', 0) + counts.get('processing', 0) }}</dd></div>
+        <div><dt>ให้คะแนนแล้ว</dt><dd>{{ counts.get('done', 0) }}</dd></div>
+        <div><dt>ภาพใช้ไม่ได้</dt><dd>{{ counts.get('rejected', 0) }}</dd></div>
+        <div><dt>ผิดพลาด</dt><dd>{{ counts.get('error', 0) }}</dd></div>
+      </dl>
+      <p style="margin-top:10px">เรียก AI วันนี้ {{ used_today }} จากเพดาน {{ settings.ai_daily }} ครั้ง</p>
+      {% if n_review %}<p class="note"><a href="/photos?status=review">มี {{ n_review }} ภาพที่ AI ประเมินสองรอบได้ผลต่างกันมาก</a> ควรให้กรรมการดู</p>{% endif %}
+      {% if not ai_ready %}<p class="note">ยังไม่ได้ตั้งค่า AI ภาพที่ส่งเข้ามาจะรอในคิว{% if user.role == 'admin' %} <a href="/admin/settings">ตั้งค่า AI</a>{% endif %}</p>
+      {% else %}<p class="muted">AI หลัก: {{ profiles[0].type }} {{ profiles[0].model }}{% if profiles|length > 1 %}, สำรอง: {{ profiles[1].type }} {{ profiles[1].model }}{% endif %}</p>{% endif %}
+      {% if wstate.paused_reason and ai_ready %}<p class="note">{{ wstate.paused_reason }}</p>{% endif %}
+      {% if wstate.last_error %}<p class="note red">ข้อผิดพลาดล่าสุดจาก AI: {{ wstate.last_error }}</p>{% endif %}
+      {% if counts.get('error', 0) and can(user, 'rounds') %}<p><a href="/admin/rounds">ไปที่รอบการตรวจเพื่อสั่งวิเคราะห์ภาพที่ผิดพลาดใหม่</a></p>{% endif %}
+    </section>
+    <section class="panel">
+      <h2>พื้นที่จัดเก็บ</h2>
+      <div class="meter {{ usage.level }}" role="img" aria-label="ใช้พื้นที่ {{ usage.pct }} เปอร์เซ็นต์"><span style="width: {{ usage.pct }}%"></span></div>
+      <p style="margin-top:8px">ใช้ {{ usage.logical|mb }} จากงบ {{ usage.budget|mb }} ({{ usage.pct|num }}%), เก็บภาพเต็ม {{ usage.images }} ภาพ</p>
+      {% if usage.level == 'full' %}<p class="note red">พื้นที่เต็ม ระบบหยุดรับภาพใหม่ สำรองข้อมูลแล้วลบภาพเก่า</p>
+      {% elif usage.level == 'warn' %}<p class="note">พื้นที่เกิน 80% ควรสำรองข้อมูลรอบเก่าแล้วลบภาพเต็ม</p>{% endif %}
+      {% if can(user, 'storage') %}<a class="btn small" href="/admin/storage">สำรองข้อมูลและจัดการพื้นที่</a>{% endif %}
+    </section>
+  </div>
+  <section class="panel">
+    <dl class="facts">
+      <div><dt>แผนกที่ใช้งาน</dt><dd>{{ n_depts }}</dd></div>
+      <div><dt>ผู้ใช้ที่ใช้งาน</dt><dd>{{ n_users }}</dd></div>
+      <div><dt>รอบที่เปิดอยู่</dt><dd>{{ open_rounds }}</dd></div>
+      <div><dt>ช่องทางแจ้งเตือน</dt><dd>{{ n_channels }}</dd></div>
+      <div><dt>กล้อง IP</dt><dd>{{ n_cameras }}</dd></div>
+      <div><dt>รุ่นของระบบ</dt><dd>{{ APP_VERSION }}</dd></div>
+    </dl>
+  </section>
+</div>
+{% endblock %}
