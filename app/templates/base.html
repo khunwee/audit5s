@@ -27,6 +27,7 @@
     {% if can(user, 'score') %}<a href="/verify" class="{{ 'on' if path.startswith('/verify') }}">ยืนยันผล</a>{% endif %}
     {% if manages(user) %}<a href="/admin" class="{{ 'on' if path.startswith('/admin') }}">จัดการ{% if storage_level in ('warn', 'full') %} (พื้นที่ใกล้เต็ม){% endif %}</a>{% endif %}
   </nav>
+  <a class="lang-switch" href="/lang/{{ 'th' if lang == 'en' else 'en' }}?next={{ path|urlencode }}" title="{{ 'เปลี่ยนเป็นภาษาไทย' if lang == 'en' else 'Switch to English' }}">{{ 'ไทย' if lang == 'en' else 'EN' }}</a>
   <details class="who">
     <summary>{{ user.full_name or user.username }}</summary>
     <div class="who-menu">

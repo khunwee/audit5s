@@ -1,6 +1,7 @@
 """ฐานข้อมูล: ตาราง, การเชื่อมต่อ, การอัปเกรดคอลัมน์อัตโนมัติ และข้อมูลตั้งต้น"""
 from datetime import datetime, timezone
 
+from sqlalchemy import event
 from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey,
                         Index, Integer, LargeBinary, String, Text, create_engine,
                         event, inspect, text)
@@ -27,6 +28,15 @@ else:
                            max_overflow=5, connect_args={"prepare_threshold": None})
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+
+# ตัวนับการเปลี่ยนแปลงของข้อมูล: เพิ่มทุกครั้งที่มีการบันทึกลงฐานข้อมูล จอแสดงผลใช้ตัดสินว่าต้องคำนวณใหม่หรือไม่
+# (จอที่เปิดทิ้งไว้ทั้งวันจึงไม่ปลุกฐานข้อมูลถ้าไม่มีอะไรเปลี่ยน)
+DATA_VERSION = {"n": 0}
+
+
+@event.listens_for(SessionLocal, "after_commit")
+def _bump_data_version(session):
+    DATA_VERSION["n"] += 1
 Base = declarative_base()
 
 
@@ -43,6 +53,8 @@ class Department(Base):
     zone = Column(String(120), default="")
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=now)
+    name_en = Column(String(120), default="")           # ชื่อภาษาอังกฤษ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ
+
 
 
 class User(Base):
@@ -98,6 +110,7 @@ class Checkpoint(Base):
     allow_na = Column(Boolean, default=True, nullable=False)
     active = Column(Boolean, default=True, nullable=False)
     sort_order = Column(Integer, default=0, nullable=False)
+    text_en = Column(Text, default="")            # ข้อความภาษาอังกฤษของข้อนี้ (ไม่บังคับ) ใช้บนจอแสดงผล
 
 
 class Action(Base):
@@ -379,12 +392,30 @@ DEFAULT_CHECKPOINTS = [
 ]
 
 
+CHECKPOINT_EN = {
+    "C01": "No unneeded, defective or damaged items in the area",
+    "C02": "No empty or unused pallets left in the area",
+    "C03": "Work in progress and materials do not overflow the designated area or rack",
+    "C04": "Walkways are clear, with nothing placed in them",
+    "C05": "Materials and parts are inside the marked lines or designated area",
+    "C06": "Tools and equipment are in their designated positions",
+    "C07": "Bins, boxes and containers are in position and aligned",
+    "C08": "No scrap or litter on the floor",
+    "C09": "No oil or water on the floor",
+    "C10": "Floors, machines, benches and racks are clean, with no built-up dust or stains",
+    "C11": "Materials, parts and racks have clear, readable identification labels",
+    "C12": "Floor markings and standard signs are in good condition and not faded",
+    "C13": "Fire extinguishers, fire exits and electrical panels are not blocked",
+}
+
+
 def checklist_snapshot(db) -> list:
     rows = (db.query(Checkpoint).filter(Checkpoint.active.is_(True))
             .order_by(Checkpoint.sort_order, Checkpoint.id).all())
     return [dict(code=k.code, crit=k.crit_code, text=k.text, minor_hint=k.minor_hint or "", major_hint=k.major_hint or "",
                  points=float(k.points), minor=float(min(k.minor_points, k.points)), types=list(k.area_types or []),
-                 area_id=k.area_id, zone=list(k.zone) if k.zone else None, allow_na=bool(k.allow_na)) for k in rows]
+                 area_id=k.area_id, zone=list(k.zone) if k.zone else None, allow_na=bool(k.allow_na),
+                 text_en=k.text_en or "") for k in rows]
 
 
 def _migrate_columns():
@@ -415,13 +446,19 @@ def init_db():
                 db.add(Criterion(sort_order=(i + 1) * 10, **c))
         if db.query(Checkpoint).count() == 0:
             seed_checkpoints(db)
+        else:       # ระบบที่อัปเกรดมา: เติมข้อความภาษาอังกฤษให้ข้อตั้งต้นที่ยังไม่ถูกแก้ข้อความไทย
+            thai = {c[0]: c[2] for c in DEFAULT_CHECKPOINTS}
+            for k in db.query(Checkpoint).filter(Checkpoint.code.in_(list(CHECKPOINT_EN))).all():
+                if not (k.text_en or "") and k.text == thai.get(k.code):
+                    k.text_en = CHECKPOINT_EN[k.code]
         db.commit()
 
 
 def seed_checkpoints(db):
     for i, (code, crit, text_, minor, major) in enumerate(DEFAULT_CHECKPOINTS):
         db.add(Checkpoint(code=code, crit_code=crit, text=text_, minor_hint=minor, major_hint=major,
-                          points=5, minor_points=3, area_types=[], allow_na=True, sort_order=(i + 1) * 10))
+                          points=5, minor_points=3, area_types=[], allow_na=True, sort_order=(i + 1) * 10,
+                          text_en=CHECKPOINT_EN.get(code, "")))
 
 
 def get_db():

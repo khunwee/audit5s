@@ -7,6 +7,7 @@
     <label class="field"><span>รหัสแผนก <em>ตัวอักษรอังกฤษหรือตัวเลข</em></span><input type="text" name="code" value="{{ d.code if d }}" required maxlength="20" placeholder="เช่น PRD1"></label>
     <label class="field"><span>ชื่อแผนก</span><input type="text" name="name" value="{{ d.name if d }}" required maxlength="120" placeholder="เช่น ผลิต 1"></label>
   </div>
+  <label class="field"><span>ชื่อภาษาอังกฤษ <em>ไม่บังคับ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ</em></span><input type="text" name="name_en" value="{{ d.name_en if d and d.name_en }}" maxlength="120" placeholder="เช่น Production 1"></label>
   <label class="field"><span>อาคารหรือโซน <em>ไม่บังคับ</em></span><input type="text" name="zone" value="{{ d.zone if d }}" maxlength="120"></label>
   {% if d %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if d.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not d.active }}>ปิดการใช้งาน</option></select></label>{% endif %}
   <button class="btn primary">{{ 'บันทึกแผนก' if d else 'เพิ่มแผนก' }}</button>

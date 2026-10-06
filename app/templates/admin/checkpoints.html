@@ -8,6 +8,7 @@
     <label class="field"><span>อยู่ในหมวด</span><select name="crit_code">{% for c in crits %}{% if c.kind != 'sustain' %}<option value="{{ c.code }}"{{ ' selected' if (k and k.crit_code == c.code) or (not k and crit and crit.code == c.code) }}>{{ c.name }}</option>{% endif %}{% endfor %}</select></label>
   </div>
   <label class="field"><span>สภาพที่ถูกต้อง <em>เขียนเป็นสิ่งที่มองเห็นได้และตัดสินได้จากภาพ</em></span><textarea name="text" required maxlength="600" placeholder="เช่น ทางเดินโล่ง ไม่มีสิ่งของวางอยู่ในทางเดิน">{{ k.text if k }}</textarea></label>
+  <label class="field"><span>ข้อความภาษาอังกฤษของข้อนี้ <em>ไม่บังคับ ใช้บนจอแสดงผลเมื่อเลือกภาษาอังกฤษ ไม่ได้ส่งให้ AI</em></span><input type="text" name="text_en" value="{{ k.text_en if k and k.text_en }}" maxlength="600"></label>
   <label class="field"><span>นับเป็นบกพร่องเล็กน้อยเมื่อ</span><input type="text" name="minor_hint" value="{{ k.minor_hint if k }}" maxlength="400"></label>
   <label class="field"><span>นับเป็นบกพร่องมากเมื่อ</span><input type="text" name="major_hint" value="{{ k.major_hint if k }}" maxlength="400"></label>
   <div class="grid-2">

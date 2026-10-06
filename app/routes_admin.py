@@ -315,6 +315,7 @@ def _checkpoint_fields(k: Checkpoint, form, db) -> str:
     if not 0 < points <= 100 or not 0 <= minor <= points:
         return "แต้มเต็มต้องมากกว่า 0 และแต้มของบกพร่องเล็กน้อยต้องไม่เกินแต้มเต็ม"
     k.text, k.crit_code, k.points, k.minor_points = text_, crit, points, minor
+    k.text_en = (form.get("text_en") or "").strip()[:600]
     k.minor_hint = (form.get("minor_hint") or "").strip()[:400]
     k.major_hint = (form.get("major_hint") or "").strip()[:400]
     k.sort_order = _int(form.get("sort_order"), 100)
@@ -447,6 +448,7 @@ def department_save(request: Request, form=Depends(form_data), user=Depends(need
         d = Department()
         db.add(d)
     d.code, d.name = code, name
+    d.name_en = (form.get("name_en") or "").strip()[:120]
     d.zone = (form.get("zone") or "").strip()[:120]
     d.active = form.get("active", "1") == "1"
     log(db, user, "save_department", f"{code} {name}")

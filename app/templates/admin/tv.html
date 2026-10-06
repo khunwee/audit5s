@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}จอแสดงผล{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>จอแสดงผล</h1><p>แสดงอันดับและความคืบหน้า 5ส ของทุกแผนกบนจอ TV หรือจอคอมพิวเตอร์ หมุนหน้าเองและอัปเดตเอง</p></div>
+  <div class="actions"><a class="btn primary" href="/tv" target="_blank" rel="noopener">เปิดจอแสดงผล</a></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <section class="panel">
+    <h2>ลิงก์สำหรับจอ TV</h2>
+    <p class="muted">เปิดลิงก์นี้ในเบราว์เซอร์ของ TV หรือกล่องที่ต่อกับ TV จอจะแสดงผลได้โดยไม่ต้องเข้าสู่ระบบ ผู้ที่มีลิงก์เห็นอันดับของทุกแผนก จึงควรใช้เฉพาะกับจอของโรงงาน</p>
+    <label class="field"><span>ลิงก์ของจอ</span><input type="text" readonly value="{{ link }}" onfocus="this.select()"></label>
+    <p class="muted">เพิ่มค่าต่อท้ายลิงก์เพื่อกำหนดเฉพาะจอได้ เช่น <code>&amp;lang=en</code>, <code>&amp;theme=dark</code>, <code>&amp;slides=ranking,trend</code>, <code>&amp;sec=20</code>, <code>&amp;rows=10</code> ใช้กับ TV ที่บันทึกการตั้งค่าในเครื่องไม่ได้</p>
+    <form method="post" action="/admin/tv/key" data-confirm="สร้างลิงก์ใหม่ ลิงก์เดิมจะใช้ไม่ได้ทันที และต้องเปิดลิงก์ใหม่บนจอทุกเครื่อง"><button class="btn small">สร้างลิงก์ใหม่ (ยกเลิกลิงก์เดิม)</button></form>
+  </section>
+
+  <form method="post" action="/admin/tv" class="panel">
+    <h2>ค่ากลางของจอ</h2>
+    <p class="muted">ทุกจอเริ่มด้วยค่านี้ แต่ละจอปรับทับได้จากปุ่มตั้งค่าบนจอเอง ซึ่งเก็บไว้ในเบราว์เซอร์ของจอนั้น</p>
+    <div class="grid-2">
+      <label class="field"><span>หัวเรื่องบนจอ <em>ว่าง = ใช้ชื่อโรงงาน</em></span><input type="text" name="tv_title" value="{{ s.tv_title }}" maxlength="80" placeholder="เช่น ผลการตรวจ 5ส โรงงาน AHP"></label>
+      <label class="field"><span>หัวเรื่องภาษาอังกฤษ</span><input type="text" name="tv_title_en" value="{{ s.tv_title_en }}" maxlength="80" placeholder="เช่น AHP 5S Audit Results"></label>
+      <label class="field"><span>ภาษาตั้งต้น</span><select name="tv_lang"><option value="th"{{ ' selected' if s.tv_lang != 'en' }}>ไทย</option><option value="en"{{ ' selected' if s.tv_lang == 'en' }}>English</option></select></label>
+      <label class="field"><span>สีพื้นของจอ</span><select name="tv_theme"><option value="light"{{ ' selected' if s.tv_theme != 'dark' }}>พื้นสว่าง (เหมาะกับพื้นที่แสงมาก)</option><option value="dark"{{ ' selected' if s.tv_theme == 'dark' }}>พื้นเข้ม</option></select></label>
+      <label class="field"><span>รอบที่แสดง</span><select name="tv_round">
+        <option value="auto"{{ ' selected' if s.tv_round == 'auto' }}>ตามการตั้งค่าการเปิดเผยอันดับ</option>
+        <option value="open"{{ ' selected' if s.tv_round == 'open' }}>รอบที่เปิดอยู่ (คะแนนเปลี่ยนตามภาพที่ส่ง)</option>
+        <option value="closed"{{ ' selected' if s.tv_round == 'closed' }}>รอบที่ปิดล่าสุด (ผลสุดท้าย)</option></select></label>
+      <label class="field"><span>จำนวนรอบย้อนหลังในกราฟ</span><input type="number" name="tv_rounds" value="{{ s.tv_rounds }}" min="2" max="12"></label>
+      <label class="field"><span>เวลาต่อหนึ่งหน้า (วินาที)</span><input type="number" name="tv_seconds" value="{{ s.tv_seconds }}" min="5" max="300"></label>
+      <label class="field"><span>จำนวนแผนกต่อหน้า</span><input type="number" name="tv_rows" value="{{ s.tv_rows }}" min="3" max="20"></label>
+      <label class="field"><span>จอถามข้อมูลใหม่ทุกกี่นาที</span><input type="number" name="tv_refresh_min" value="{{ s.tv_refresh_min }}" min="1" max="120"></label>
+      <label class="field"><span>ช่วงเวลาที่จออัปเดตข้อมูล <em>เช่น 07:00-19:00 ว่าง = ทั้งวัน</em></span><input type="text" name="tv_hours" value="{{ s.tv_hours }}" placeholder="07:00-19:00" pattern="\s*\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*"></label>
+    </div>
+    <fieldset class="perm-box"><legend>หน้าที่แสดง (หมุนตามลำดับนี้)</legend>
+      {% for key, label in slides.items() %}<label class="check"><input type="checkbox" name="slides" value="{{ key }}"{{ ' checked' if key in s.tv_slides }}><span>{{ label }}</span></label>{% endfor %}
+    </fieldset>
+    <label class="check"><input type="checkbox" name="tv_clock" value="1"{{ ' checked' if s.tv_clock }}><span>แสดงนาฬิกา</span></label>
+    <label class="check"><input type="checkbox" name="tv_unranked" value="1"{{ ' checked' if s.tv_unranked }}><span>แสดงรายชื่อแผนกที่ยังไม่ถูกจัดอันดับ</span></label>
+    <button class="btn primary">บันทึกการตั้งค่าจอ</button>
+  </form>
+
+  <section class="panel panel-line">
+    <h2>วิธีใช้บนจอ TV</h2>
+    <ul>
+      <li>กดปุ่มเต็มจอที่มุมล่างขวาของจอ หรือกดปุ่ม F บนคีย์บอร์ด เพื่อสลับระหว่างเต็มจอกับหน้าต่างปกติ ขนาดตัวอักษรปรับตามขนาดจอเอง</li>
+      <li>ปุ่ม EN หรือ ไทย เปลี่ยนภาษาของจอ ปุ่มรูปเฟืองเปิดการตั้งค่าเฉพาะจอนั้น</li>
+      <li>ลูกศรซ้ายขวาเปลี่ยนหน้า ปุ่มเว้นวรรคหยุดหรือเล่นต่อ แถบควบคุมซ่อนเองเมื่อไม่ขยับเมาส์</li>
+      <li>จอคำนวณข้อมูลใหม่เฉพาะเมื่อมีการเปลี่ยนแปลงในระบบ การเปิดจอทิ้งไว้จึงไม่ทำให้ฐานข้อมูลบน cloud ฟรีทำงานตลอดเวลา แต่จะทำให้บริการเว็บไม่หลับ ควรตั้งช่วงเวลาอัปเดตให้ตรงกับเวลาทำงาน</li>
+    </ul>
+  </section>
+</div>
+{% endblock %}

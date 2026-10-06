@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, notify, routes_admin, routes_main, settings_store, worker
+from . import config, notify, routes_admin, routes_main, routes_tv, settings_store, worker
 from .db import SessionLocal, User, init_db
 from .security import NeedLogin, NeedPasswordChange
 from .web import render
@@ -33,6 +33,7 @@ app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION, docs_url=None, 
               openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(routes_main.router)
+app.include_router(routes_tv.router)
 app.include_router(routes_admin.router)
 
 

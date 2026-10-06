@@ -1,0 +1,144 @@
+/* 5ส Vision: จอแสดงผล (TV)
+   ขนาดทุกอย่างเป็น rem และ tv.js ตั้ง font-size ของ html ตามขนาดจอ จึงใช้ได้ตั้งแต่หน้าต่างเล็กจนถึงจอ 4K
+   ไม่ใช้ clamp() / min() เพื่อให้เบราว์เซอร์ของ TV รุ่นเก่าแสดงผลได้ */
+html { font-size: 16px; }
+html, body { height: 100%; margin: 0; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body.tv {
+  --bg: #E7EAE4; --panel: #FFFFFF; --ink: #1D2A2F; --ink2: #55646A; --line: #C6CDC5; --lane: #D9DED6;
+  --tape: #F2B705; --go: #1F7A4D; --mid: #B98A00; --tag: #C8321F; --wip: #2A5DA8;
+  --display: "Chakra Petch", "Leelawadee UI", Tahoma, sans-serif;
+  --body: "Anuphan", "Leelawadee UI", "Noto Sans Thai", Tahoma, sans-serif;
+  background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 1rem; line-height: 1.4;
+  display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+}
+body.tv.theme-dark {
+  --bg: #142026; --panel: #1E2E36; --ink: #EEF2EC; --ink2: #A9B6B5; --line: #34474F; --lane: #2A3C45;
+  --go: #3FB377; --mid: #F2B705; --tag: #EA5C45; --wip: #7CA8EA;
+}
+body.tv:not(.show-ctrl) { cursor: none; }
+
+.tv-tape { flex: none; height: .5rem; background: repeating-linear-gradient(-45deg, #F2B705 0, #F2B705 1rem, #1D2A2F 1rem, #1D2A2F 2rem); }
+.tv-head { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 2rem; padding: .8rem 2rem .7rem; background: var(--panel); border-bottom: .12rem solid var(--ink); }
+.tv-brand { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.tv-mark { flex: none; font: 700 1.9rem/1 var(--display); background: #F2B705; color: #1D2A2F; padding: .45rem .6rem; border: .12rem solid #1D2A2F; border-radius: .2rem; }
+.tv-head h1 { margin: 0; font: 600 1.7rem/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-head p { margin: .1rem 0 0; font-size: 1rem; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-brand > div { min-width: 0; }
+.tv-meta { flex: none; text-align: right; }
+.tv-meta #tv-slide { font: 600 1.35rem/1.2 var(--display); color: var(--ink); }
+.tv-meta #tv-clock { font: 500 1.05rem/1.3 var(--display); }
+
+#tv-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 1rem 2rem .7rem; }
+.tv-msg { margin: auto; max-width: 42rem; text-align: center; font-size: 1.6rem; color: var(--ink2); }
+.tv-progress { flex: none; height: .25rem; background: var(--lane); }
+.tv-progress i { display: block; height: 100%; width: 0; background: var(--tape); }
+.tv-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: .5rem 2rem; font-size: .9rem; color: var(--ink2); background: var(--panel); border-top: .06rem solid var(--line); white-space: nowrap; }
+.tv-legend span { margin-right: 1.2rem; }
+.tv-legend i { display: inline-block; width: .9rem; height: .9rem; margin-right: .35rem; vertical-align: -.1rem; }
+.tv-dots i { display: inline-block; width: .55rem; height: .55rem; margin: 0 .2rem; border-radius: 50%; background: var(--line); }
+.tv-dots i.on { background: var(--ink); }
+.tv-updated.off { color: var(--tag); font-weight: 600; }
+.bg-good { background: var(--go); } .bg-mid { background: var(--mid); } .bg-low { background: var(--tag); }
+
+/* ---- อันดับ: แต่ละแผนกเป็นหนึ่งเลน ความยาวของแถบคือคะแนน ขีดตั้งคือเกณฑ์สี ---- */
+.rk { flex: 1; min-height: 0; display: grid; grid-gap: .45rem; }
+.rk-row { min-height: 0; display: grid; grid-template-columns: 4.6rem minmax(10rem, 24rem) 1fr 7.6rem 8.6rem; grid-gap: 1.1rem; align-items: center; padding: 0 1.2rem 0 .9rem; background: var(--panel); border: .06rem solid var(--line); border-left: .6rem solid var(--go); }
+.rk-row.mid { border-left-color: var(--mid); } .rk-row.low { border-left-color: var(--tag); }
+.rk-n { font: 700 2.5rem/1 var(--display); text-align: center; }
+.rk-row.top .rk-n { background: #F2B705; color: #1D2A2F; border: .1rem solid #1D2A2F; border-radius: .2rem; padding: .22rem 0; }
+.rk-name { min-width: 0; font: 600 1.55rem/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rk-name small { display: block; font: 400 .85rem/1.3 var(--body); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
+.rk-track { position: relative; height: 1.5rem; background: var(--lane); }
+.rk-track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--go); }
+.rk-row.mid .rk-track i { background: var(--mid); } .rk-row.low .rk-track i { background: var(--tag); }
+.rk-track b { position: absolute; top: -.3rem; bottom: -.3rem; width: .12rem; background: var(--ink); opacity: .5; }
+.rk-score { font: 700 2.3rem/1 var(--display); text-align: right; }
+.rk-score small { font-size: 1.1rem; font-weight: 600; margin-left: .1rem; }
+.rk-delta { font: 600 1.15rem/1.2 var(--display); text-align: right; white-space: nowrap; }
+.rk-delta small { display: block; font: 400 .8rem/1.3 var(--body); color: var(--ink2); }
+.up { color: var(--go); } .down { color: var(--tag); } .flat { color: var(--ink2); }
+.rk-foot { flex: none; margin-top: .6rem; font-size: 1rem; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- แนวโน้ม: การ์ดเล็กของแต่ละแผนก ---- */
+.tr { flex: 1; min-height: 0; display: grid; grid-gap: .7rem; }
+.tr-card { min-height: 0; min-width: 0; display: flex; flex-direction: column; padding: .7rem .9rem .5rem; background: var(--panel); border: .06rem solid var(--line); border-top: .35rem solid var(--go); }
+.tr-card.mid { border-top-color: var(--mid); } .tr-card.low { border-top-color: var(--tag); } .tr-card.none { border-top-color: var(--line); }
+.tr-top { display: flex; justify-content: space-between; align-items: baseline; gap: .6rem; }
+.tr-name { min-width: 0; font: 600 1.15rem/1.25 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-score { flex: none; font: 700 1.6rem/1 var(--display); }
+.tr-sub { display: flex; justify-content: space-between; gap: .6rem; font-size: .82rem; color: var(--ink2); white-space: nowrap; }
+.tr-plot { flex: 1; min-height: 0; margin-top: .3rem; }
+.tr-plot svg, .chart svg { display: block; width: 100%; height: 100%; }
+
+/* ---- กราฟประวัติอันดับ ---- */
+.chart { flex: 1; min-height: 0; padding: .6rem; background: var(--panel); border: .06rem solid var(--line); }
+svg text { font-family: var(--display); fill: var(--ink); }
+svg .quiet { fill: var(--ink2); }
+svg .grid { stroke: var(--line); }
+
+/* ---- ตารางคะแนนย้อนหลัง ---- */
+.hist { flex: 1; min-height: 0; display: grid; grid-gap: .3rem; }
+.hist-row { min-height: 0; display: grid; grid-gap: .3rem; }
+.hist-cell { min-width: 0; display: flex; align-items: center; justify-content: center; background: var(--panel); border-bottom: .3rem solid transparent; font: 600 1.25rem/1.1 var(--display); }
+.hist-cell.good { border-bottom-color: var(--go); } .hist-cell.mid { border-bottom-color: var(--mid); } .hist-cell.low { border-bottom-color: var(--tag); }
+.hist-cell.none { color: var(--ink2); font-weight: 400; }
+.hist-cell small { font: 400 .75rem var(--body); color: var(--ink2); margin-left: .4rem; }
+.hist-head .hist-cell { background: none; font: 500 .85rem/1.2 var(--body); color: var(--ink2); text-align: center; padding: 0 .2rem; overflow: hidden; }
+.hist-name { justify-content: flex-start; padding: 0 .9rem; font: 600 1.15rem/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; line-height: 2.2; }
+.hist-row .hist-name { display: flex; }
+.hist-name span { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- รายหมวดและข้อที่ไม่ผ่านบ่อย / งานแก้ไข ---- */
+.two { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-gap: 1rem; }
+.box { min-height: 0; min-width: 0; display: flex; flex-direction: column; padding: 1rem 1.3rem; background: var(--panel); border: .06rem solid var(--line); overflow: hidden; }
+.box h2 { flex: none; margin: 0 0 .7rem; font: 600 1.3rem/1.2 var(--display); }
+.box-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: space-around; }
+.cat-row { display: grid; grid-template-columns: minmax(8rem, 16rem) 1fr 5.5rem; grid-gap: 1rem; align-items: center; }
+.cat-row span { font: 600 1.2rem/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-row b { font: 700 1.6rem/1 var(--display); text-align: right; }
+.par-row { min-width: 0; }
+.par-row p { margin: 0; font-size: 1.05rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.par-row p b { font-family: var(--display); margin-right: .5rem; }
+.par-row small { font-size: .82rem; color: var(--ink2); }
+.par-bar { display: flex; height: .7rem; margin-top: .25rem; background: var(--lane); }
+.par-bar i { display: block; height: 100%; } .par-bar .mj { background: var(--tag); } .par-bar .mn { background: var(--tape); }
+.tiles { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); grid-gap: .8rem; margin-bottom: .8rem; }
+.tile { padding: .8rem 1.1rem; background: var(--panel); border: .06rem solid var(--line); border-left: .5rem solid var(--ink); }
+.tile b { display: block; font: 700 2.4rem/1.05 var(--display); }
+.tile span { font-size: .95rem; color: var(--ink2); }
+.tile.good { border-left-color: var(--go); } .tile.mid { border-left-color: var(--mid); } .tile.low { border-left-color: var(--tag); }
+
+/* ---- แถบควบคุมและแผงตั้งค่า ---- */
+.tv-ctrl { position: fixed; right: 1rem; bottom: 3.4rem; display: flex; gap: .4rem; opacity: 0; transition: opacity .25s; pointer-events: none; }
+body.show-ctrl .tv-ctrl { opacity: 1; pointer-events: auto; }
+.tv-ctrl button { min-width: 2.9rem; height: 2.9rem; padding: 0 .7rem; font: 600 1.05rem/1 var(--display); color: var(--ink); background: var(--panel); border: .1rem solid var(--ink); border-radius: .25rem; cursor: pointer; }
+.tv-ctrl button:hover, .tv-ctrl button:focus { background: #F2B705; color: #1D2A2F; outline: none; }
+.tv-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 24rem; max-width: 100%; overflow-y: auto; padding: 1.2rem 1.4rem; background: var(--panel); color: var(--ink); border-left: .15rem solid var(--ink); z-index: 5; font-size: 16px; }
+.tv-panel h2 { margin: 0 0 12px; font: 600 20px var(--display); }
+.tv-panel label { display: block; margin-bottom: 10px; font-size: 14px; }
+.tv-panel label > span { display: block; margin-bottom: 3px; color: var(--ink2); }
+.tv-panel select, .tv-panel input[type=number] { width: 100%; min-height: 40px; padding: 6px 10px; font: 16px var(--body); color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 4px; }
+.tv-panel fieldset { margin: 0 0 10px; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 4px; }
+.tv-panel legend { padding: 0 6px; font-size: 14px; color: var(--ink2); }
+.tv-panel .ck { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.tv-panel .ck span { margin: 0; color: var(--ink); }
+.tv-panel .ck input { width: 18px; height: 18px; }
+.tv-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tv-panel button { min-height: 40px; padding: 0 14px; font: 600 15px var(--display); color: var(--ink); background: var(--panel); border: 1.5px solid var(--ink); border-radius: 4px; cursor: pointer; }
+.tv-panel button.pri { background: #1F7A4D; border-color: #1F7A4D; color: #fff; }
+.tv-panel .note { margin: 12px 0 0; font-size: 13px; color: var(--ink2); }
+
+/* ---- จอแนวตั้งหรือหน้าต่างแคบ: ซ่อนแถบคะแนน เหลือเลขอันดับ ชื่อ คะแนน ---- */
+body.portrait .tv-head { padding: .7rem 1rem; gap: 1rem; }
+body.portrait #tv-stage { padding: .8rem 1rem .6rem; }
+body.portrait .tv-foot { padding: .4rem 1rem; }
+body.portrait .tv-legend { display: none; }
+body.portrait .rk-row { grid-template-columns: 3.6rem 1fr 6.4rem 6.8rem; grid-gap: .7rem; padding: 0 .8rem 0 .6rem; }
+body.portrait .rk-track { display: none; }
+body.portrait .rk-n { font-size: 2rem; } body.portrait .rk-name { font-size: 1.3rem; } body.portrait .rk-score { font-size: 1.9rem; }
+body.portrait .two { grid-template-columns: 1fr; }
+body.portrait .tiles { grid-template-columns: repeat(2, 1fr); }
+@media (prefers-reduced-motion: reduce) { .tv-ctrl { transition: none; } }

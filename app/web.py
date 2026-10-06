@@ -80,4 +80,16 @@ def render(request, name: str, user=None, db=None, status_code: int = 200, **ctx
                flashes=request.session.pop("flash", []), path=request.url.path)
     if user is not None and security.can(user, "storage") and db is not None:
         ctx["storage_level"] = storage.usage(db, s)["level"]
-    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+    lang = "en" if request.cookies.get("lang") == "en" else "th"
+    ctx["lang"] = lang
+    resp = templates.TemplateResponse(request, name, ctx, status_code=status_code)
+    if lang == "en":
+        # หน้าจอภาษาอังกฤษ: แทนข้อความคงที่ด้วยคำแปล และใช้ชื่อแผนกภาษาอังกฤษถ้ามี
+        from fastapi.responses import HTMLResponse
+        from . import i18n
+        extra = {}
+        if db is not None:
+            from .db import Department
+            extra = {d.name: d.name_en for d in db.query(Department).all() if d.name_en}
+        resp = HTMLResponse(i18n.translate_html(resp.body.decode("utf-8"), extra), status_code=status_code)
+    return resp

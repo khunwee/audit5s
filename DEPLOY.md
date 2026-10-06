@@ -59,7 +59,7 @@ pip install pytest
 pytest -q
 ```
 
-ควรได้ `46 passed`
+ควรได้ `54 passed`
 
 ## ส่วน C นำโค้ดขึ้น GitHub
 
@@ -70,7 +70,7 @@ pytest -q
 cd C:\Projects\fives-vision
 git init
 git add .
-git commit -m "5S Vision 1.3.3"
+git commit -m "5S Vision 1.4.0"
 git branch -M main
 git remote add origin https://github.com/ชื่อบัญชี/fives-vision.git
 git push -u origin main
@@ -146,7 +146,7 @@ postgresql://neondb_owner:xxxxxxxx@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/n
 
 1. เปิดลิงก์ `https://ชื่อบริการ.onrender.com`
 2. เข้าสู่ระบบด้วย `admin` กับรหัสใน `ADMIN_PASSWORD` ระบบจะให้ตั้งรหัสผ่านใหม่ทันที
-3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.3.3"}`
+3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.4.0"}`
 
 ถ้า build ไม่ผ่านหรือเปิดไม่ได้ ดูแท็บ Logs ของบริการ แล้วเทียบกับส่วน J
 

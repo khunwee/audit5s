@@ -420,3 +420,7 @@ table.trend th a { color: inherit; }
 .nav a { white-space: nowrap; }
 @media (max-width: 480px) { .ck { grid-template-columns: 1fr auto; } .ck-st { grid-column: 1 / -1; justify-self: start; } }
 @media print { .fbox, .zbox, .ck-st, .pareto .pbar i { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
+/* ---------- รุ่น 1.4: ปุ่มเปลี่ยนภาษา ---------- */
+.lang-switch { display: inline-block; font: 600 .86rem/1 var(--display); padding: 7px 10px; border: 1.5px solid var(--line); border-radius: var(--r); color: var(--ink); text-decoration: none; background: var(--paper); margin-right: 8px; white-space: nowrap; }
+.lang-switch:hover { border-color: var(--ink); }

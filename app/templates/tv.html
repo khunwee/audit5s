@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="{{ cfg.lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>5ส Vision: {{ cfg.title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/tv.css?v={{ version }}">
+</head>
+<body class="tv theme-{{ cfg.theme }}">
+<div class="tv-tape" aria-hidden="true"></div>
+<header class="tv-head">
+  <div class="tv-brand"><span class="tv-mark">5ส</span><div><h1 id="tv-title"></h1><p id="tv-round"></p></div></div>
+  <div class="tv-meta"><p id="tv-slide"></p><p id="tv-clock"></p></div>
+</header>
+<main id="tv-stage" aria-live="off"><p class="tv-msg" id="tv-msg">กำลังโหลดข้อมูล</p></main>
+<div class="tv-progress" aria-hidden="true"><i id="tv-bar"></i></div>
+<footer class="tv-foot">
+  <div id="tv-legend" class="tv-legend"></div>
+  <div id="tv-dots" class="tv-dots" aria-hidden="true"></div>
+  <div id="tv-updated" class="tv-updated"></div>
+</footer>
+<div class="tv-ctrl" id="tv-ctrl">
+  <button type="button" data-act="prev" title="ก่อนหน้า / Previous">&#9664;</button>
+  <button type="button" data-act="pause" title="หยุดหรือเล่นต่อ / Pause or play" id="tv-pause">&#10073;&#10073;</button>
+  <button type="button" data-act="next" title="ถัดไป / Next">&#9654;</button>
+  <button type="button" data-act="lang" id="tv-lang" title="เปลี่ยนภาษา / Change language">EN</button>
+  <button type="button" data-act="full" id="tv-full" title="เต็มจอ / Full screen">&#x26F6;</button>
+  <button type="button" data-act="settings" title="ตั้งค่าจอนี้ / Settings">&#9881;</button>
+</div>
+<aside class="tv-panel" id="tv-panel" hidden>
+  <form id="tv-form">
+    <h2 data-t="settings"></h2>
+    <label><span data-t="language"></span><select name="lang"><option value="th">ไทย</option><option value="en">English</option></select></label>
+    <label><span data-t="theme"></span><select name="theme"><option value="light" data-t="light"></option><option value="dark" data-t="dark"></option></select></label>
+    <label><span data-t="seconds"></span><input type="number" name="seconds" min="5" max="300"></label>
+    <label><span data-t="rows"></span><input type="number" name="rows" min="3" max="20"></label>
+    <label><span data-t="rounds"></span><input type="number" name="rounds" min="2" max="12"></label>
+    <fieldset><legend data-t="pages"></legend>
+      {% for key in slides %}<label class="ck"><input type="checkbox" name="slides" value="{{ key }}"><span data-t="s_{{ key }}"></span></label>{% endfor %}
+    </fieldset>
+    <label class="ck"><input type="checkbox" name="clock"><span data-t="clock"></span></label>
+    <label class="ck"><input type="checkbox" name="unranked"><span data-t="unranked"></span></label>
+    <div class="tv-panel-actions">
+      <button type="submit" class="pri" data-t="save"></button>
+      <button type="button" data-act="reset" data-t="reset"></button>
+      <button type="button" data-act="close" data-t="close"></button>
+    </div>
+    <p class="note" data-t="panel_note"></p>
+  </form>
+</aside>
+<script id="tv-config" type="application/json">{{ cfg|tojson }}</script>
+<script src="/static/tv.js?v={{ version }}"></script>
+</body>
+</html>

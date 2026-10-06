@@ -7,6 +7,7 @@
   {% if rnd and allowed %}
   <div class="actions no-print">
     <a class="btn small quiet" href="/dashboard?round={{ rnd.id }}">ภาพรวม</a>
+    <a class="btn small quiet" href="/tv" target="_blank" rel="noopener">จอแสดงผล</a>
     <a class="btn small quiet" href="/trend">แนวโน้มข้ามรอบ</a>
     <a class="btn small" href="/rounds/{{ rnd.id }}/report" target="_blank" rel="noopener">รายงานสำหรับพิมพ์</a>
     {% if can(user, 'export') %}

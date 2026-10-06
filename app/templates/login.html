@@ -2,6 +2,7 @@
 {% block title %}เข้าสู่ระบบ{% endblock %}
 {% block content %}
 <div class="login-wrap">
+  <p style="text-align:right;margin:0 0 8px"><a class="lang-switch" href="/lang/{{ 'th' if lang == 'en' else 'en' }}?next=/login">{{ 'ไทย' if lang == 'en' else 'English' }}</a></p>
   <div class="brand"><span class="brand-mark">5ส</span><span class="brand-text">Vision<small>{{ org_name }}</small></span></div>
   <form method="post" action="/login" class="panel">
     <h1 style="font-size:1.3rem;margin-bottom:14px">เข้าสู่ระบบ</h1>
