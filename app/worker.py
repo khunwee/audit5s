@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func
 
-from . import ai, notify, settings_store, storage
+from . import ai, imaging, notify, rules, settings_store, storage
 from .db import AiUsage, Photo, PhotoImage, Round, SessionLocal, now
 
 log = logging.getLogger("fives.worker")
@@ -97,15 +97,32 @@ def process_one() -> bool:
                 from .db import AuditArea
                 area = db.get(AuditArea, photo.area_id)
                 meta["standard"] = area.standard if area is not None else ""
-            result, provider, model = ai.analyze(blob.data, list(rnd.rubric or []), meta, s, on_call=count_call)
-            review = False
-            if int(s.get("ai_passes", 1)) >= 2 and provider != "demo" and result.get("image_ok", True):
-                try:      # รอบที่สองล้มเหลวไม่เป็นไร ใช้ผลรอบแรก
-                    second, _, _ = ai.analyze(blob.data, list(rnd.rubric or []), meta, s, on_call=count_call)
-                    result, review = ai.merge_passes(result, second)
-                except ai.AIError:
-                    pass
+            rubric, review = list(rnd.rubric or []), False
+            twice = int(s.get("ai_passes", 1)) >= 2
+            if (rnd.mode or "level") == "checklist":
+                # AI รายงานสภาพทีละข้อ แล้ว rule engine เป็นผู้คิดคะแนน
+                checks = rules.applicable(rnd.checklist or [], rubric, photo)
+                picture = imaging.draw_zones(blob.data, rules.zones_of(checks))
+                result, provider, model = ai.analyze_checklist(picture, checks, meta, s, on_call=count_call)
+                if twice and provider != "demo" and result.get("image_ok", True):
+                    try:
+                        second, _, _ = ai.analyze_checklist(picture, checks, meta, s, on_call=count_call)
+                        result, review = ai.merge_check_passes(result, second)
+                    except ai.AIError:
+                        pass
+                result = rules.finalize(db, photo, rubric, result)
+            else:
+                result, provider, model = ai.analyze(blob.data, rubric, meta, s, on_call=count_call)
+                if twice and provider != "demo" and result.get("image_ok", True):
+                    try:      # รอบที่สองล้มเหลวไม่เป็นไร ใช้ผลรอบแรก
+                        second, _, _ = ai.analyze(blob.data, rubric, meta, s, on_call=count_call)
+                        result, review = ai.merge_passes(result, second)
+                    except ai.AIError:
+                        pass
             apply_result(photo, result, provider, model)
+            if photo.status == "done" and photo.after_of:
+                from . import actions
+                actions.close_fixed(db, photo)
             photo.review_flag = review
             photo.verified_by, photo.verified_at = "", None       # ผลใหม่ต้องให้คนยืนยันใหม่
             photo.overridden = False
@@ -148,6 +165,8 @@ def housekeeping() -> dict:
         out["cleanup"] = storage.auto_cleanup(db, s)
         out["alerts"] = storage.check_alerts(db, settings_store.load())
         out["backup"] = storage.backup_reminders(db, settings_store.load())
+        from . import actions
+        out["actions"] = actions.overdue_reminders(db)
         today = (now() + _td(hours=7)).date()
         out["closing"] = 0
         for rnd in db.query(Round).filter(Round.status == "open").all():

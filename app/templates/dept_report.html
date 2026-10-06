@@ -62,7 +62,7 @@
     <div class="report" style="padding:0;max-width:none">
       {% for p in photos %}
       <div class="panel photo-row" style="border:1.5px solid var(--line);margin-bottom:10px;padding:14px">
-        <a href="/photos/{{ p.id }}"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}"></a>
+        <a href="/photos/{{ p.id }}">{{ m.shot(p, '/photos/' ~ p.id ~ '/image') }}</a>
         <div>
           <div class="split"><h3>{{ p.area_name }}</h3>{% if p.status == 'done' %}{{ m.tag(p.percent) }}{% endif %}</div>
           <p class="muted">ภาพเลขที่ {{ p.id }}, ส่งเมื่อ {{ p.created_at|dt }} โดย {{ p.uploader_name or '-' }} {{ m.chip(p) }}{% if p.id in old %} <span class="chip chip-plain">มีภาพหลังแก้ไขแล้ว ไม่นำมาเฉลี่ย</span>{% endif %}{% if p.after_of %} <span class="chip chip-done">ภาพหลังแก้ไขของภาพ {{ p.after_of }}</span>{% endif %}</p>

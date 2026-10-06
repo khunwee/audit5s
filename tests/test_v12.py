@@ -378,7 +378,7 @@ def test_07_housekeeping_reminders():
     clear_alert_stamps()
     OUT.clear()
     before = len(alerts())
-    assert worker.housekeeping() == {"cleanup": {"by_age": 0, "by_space": 0}, "alerts": [], "backup": 0, "closing": 0}
+    assert worker.housekeeping() == {"cleanup": {"by_age": 0, "by_space": 0}, "alerts": [], "backup": 0, "actions": 0, "closing": 0}
     # ภาพอายุ 85 วัน นโยบายเก็บ 90 วัน เตือนล่วงหน้า 7 วัน และยังไม่เคยสำรอง -> เตือนให้สำรอง
     save(retention_days=90, backup_remind_days=7, purge_requires_backup=True)
     with dbm.SessionLocal() as s:

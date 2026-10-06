@@ -61,6 +61,16 @@
       <label class="field"><span>คะแนนตั้งแต่กี่ % แสดงสีเขียว</span><input type="number" name="band_good" value="{{ s.band_good }}" min="1" max="100"></label>
       <label class="field"><span>คะแนนตั้งแต่กี่ % แสดงสีเหลือง <em>ต่ำกว่านี้เป็นสีแดง</em></span><input type="number" name="band_mid" value="{{ s.band_mid }}" min="0" max="99"></label>
     </div>
+    <label class="field"><span>วิธีให้คะแนนตั้งต้นของรอบที่สร้างใหม่</span>
+      <select name="scoring_mode">
+        <option value="checklist"{{ ' selected' if s.scoring_mode == 'checklist' }}>รายการตรวจ: AI ตรวจทีละข้อ ระบบคิดคะแนนตามกติกาของโรงงาน (ตรวจสอบย้อนได้รายข้อ)</option>
+        <option value="level"{{ ' selected' if s.scoring_mode != 'checklist' }}>ระดับ 0 ถึง 4: AI เลือกระดับของแต่ละหมวด</option>
+      </select></label>
+    <label class="check"><input type="checkbox" name="auto_actions" value="1"{{ ' checked' if s.auto_actions }}><span>เมื่อยืนยันผล ให้สร้างงานแก้ไขจากข้อที่ไม่ผ่านโดยอัตโนมัติ <em class="muted">(โหมดรายการตรวจ)</em></span></label>
+    <div class="grid-2">
+      <label class="field"><span>กำหนดเสร็จของข้อบกพร่องมาก (วัน)</span><input type="number" name="action_due_days_major" value="{{ s.action_due_days_major }}" min="0" max="365"></label>
+      <label class="field"><span>กำหนดเสร็จของข้อบกพร่องเล็กน้อย (วัน)</span><input type="number" name="action_due_days" value="{{ s.action_due_days }}" min="0" max="365"></label>
+    </div>
     <label class="check"><input type="checkbox" name="allow_free_area" value="1"{{ ' checked' if s.allow_free_area }}><span>ให้ส่งภาพของจุดที่ไม่อยู่ในรายการจุดตรวจได้ โดยพิมพ์ชื่อเอง <em class="muted">(ปิดไว้ = ส่งได้เฉพาะจุดตรวจที่โรงงานกำหนด สำหรับแผนกที่กำหนดจุดไว้แล้ว)</em></span></label>
     <label class="check"><input type="checkbox" name="require_coverage" value="1"{{ ' checked' if s.require_coverage }}><span>จัดอันดับเฉพาะแผนกที่ส่งภาพครบทุกจุดตรวจบังคับ <em class="muted">(ทุกแผนกถูกวัดจากจุดที่โรงงานเลือก ไม่ใช่จุดที่แผนกเลือกเอง)</em></span></label>
     <label class="check"><input type="checkbox" name="verify_required" value="1"{{ ' checked' if s.verify_required }}><span>นับคะแนนเฉพาะภาพที่หัวหน้าหรือกรรมการยืนยันแล้ว <em class="muted">(AI เสนอคะแนน คนเป็นผู้รับรอง ปิดไว้ = นับทันทีที่ AI ให้คะแนน และยืนยันภายหลังได้)</em></span></label>

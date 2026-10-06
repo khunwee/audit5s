@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}โซนของ {{ area.name }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>โซนของ {{ area.name }}</h1><p>{{ area.department.name }}, วาดกรอบบนภาพจากกล้องติดตาย แล้วบอกว่าในกรอบนั้นต้องเป็นอย่างไร</p></div>
+  <div class="actions"><a class="btn small quiet" href="/admin/areas">กลับไปจุดตรวจ</a></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <p class="note blue">โซนใช้กับภาพจากกล้อง IP ของจุดนี้เท่านั้น เพราะมุมภาพต้องคงที่ ระบบจะวาดกรอบพร้อมรหัสโซนลงบนภาพที่ส่งให้ AI แล้วให้ AI ตัดสินเฉพาะสิ่งที่อยู่ในกรอบ ภาพจากมือถือของจุดเดียวกันจะไม่ใช้ข้อที่เป็นโซน
+    {% if not cams %}<b>ยังไม่มีกล้อง IP ที่ตั้งชื่อจุดตรวจตรงกับ "{{ area.name }}"</b> {% if user.role == 'admin' %}<a href="/admin/cameras">ลงทะเบียนกล้อง</a>{% endif %}{% endif %}</p>
+  {% if not ref %}
+    <div class="empty"><h2>ยังไม่มีภาพของจุดนี้ให้วาดกรอบ</h2><p>ถ่ายภาพจากกล้องของจุดนี้ 1 ภาพในรอบที่เปิดอยู่ก่อน แล้วกลับมาที่หน้านี้</p></div>
+  {% else %}
+  <section class="panel">
+    <h2>วาดโซนใหม่</h2>
+    {% if not from_camera %}<p class="note">ภาพอ้างอิงนี้ไม่ได้มาจากกล้องติดตาย กรอบที่วาดอาจไม่ตรงกับมุมของกล้องจริง ควรถ่ายจากกล้อง IP ของจุดนี้ก่อน</p>{% endif %}
+    <p class="muted">ลากนิ้วหรือเมาส์บนภาพเพื่อวาดกรอบ ภาพอ้างอิงคือภาพเลขที่ {{ ref.id }} เมื่อ {{ ref.created_at|dt }}</p>
+    <span class="zone-stage" id="zone-stage">
+      <img src="/photos/{{ ref.id }}/image" alt="ภาพอ้างอิงของจุดตรวจ" draggable="false">
+      {% for k in items %}{% if k.zone %}<span class="zbox" style="left:{{ k.zone[0] / 10 }}%;top:{{ k.zone[1] / 10 }}%;width:{{ (k.zone[2] - k.zone[0]) / 10 }}%;height:{{ (k.zone[3] - k.zone[1]) / 10 }}%"><b>{{ k.code }}</b></span>{% endif %}{% endfor %}
+      <span class="zdraw" id="zone-draw" hidden></span>
+    </span>
+    <form method="post" action="/admin/areas/{{ area.id }}/zones/save" style="margin-top:14px" id="zone-form">
+      <input type="hidden" name="x1"><input type="hidden" name="y1"><input type="hidden" name="x2"><input type="hidden" name="y2">
+      <p id="zone-hint" class="muted">ยังไม่ได้วาดกรอบ</p>
+      <label class="field"><span>ในกรอบนี้ต้องเป็นอย่างไร</span><textarea name="text" required maxlength="600" placeholder="เช่น ทางเดิน ต้องไม่มีสิ่งของวาง / พาเลทต้องอยู่ในกรอบนี้ทั้งใบ / ต้องมีรถเข็นจอดไม่เกิน 2 คัน"></textarea></label>
+      <label class="field"><span>นับเป็นบกพร่องเล็กน้อยเมื่อ</span><input type="text" name="minor_hint" maxlength="400" placeholder="เช่น มีของล้ำเข้ามาเล็กน้อย 1 จุด"></label>
+      <label class="field"><span>นับเป็นบกพร่องมากเมื่อ</span><input type="text" name="major_hint" maxlength="400" placeholder="เช่น มีของวางอยู่ในกรอบชัดเจน"></label>
+      <div class="grid-2">
+        <label class="field"><span>อยู่ในหมวด</span><select name="crit_code">{% for c in crits %}{% if c.kind != 'sustain' %}<option value="{{ c.code }}">{{ c.name }}</option>{% endif %}{% endfor %}</select></label>
+        <label class="field"><span>แต้มเมื่อผ่าน</span><input type="number" name="points" value="5" min="0.5" max="100" step="any" required></label>
+        <label class="field"><span>แต้มเมื่อบกพร่องเล็กน้อย</span><input type="number" name="minor_points" value="3" min="0" max="100" step="any" required></label>
+      </div>
+      <button class="btn primary">บันทึกโซน</button>
+    </form>
+  </section>
+  {% endif %}
+  <section class="panel">
+    <h2>โซนที่กำหนดแล้ว</h2>
+    {% for k in items %}
+    <div class="crit"><div class="crit-head"><h3>{{ k.code }} {{ k.text }}</h3><span class="num">{{ k.points|num }} / {{ k.minor_points|num }} / 0</span></div>
+      <p class="muted">หมวด {{ k.crit_code }}{% if k.minor_hint %}, เล็กน้อย: {{ k.minor_hint }}{% endif %}{% if k.major_hint %}, มาก: {{ k.major_hint }}{% endif %}</p>
+      <form method="post" action="/admin/checkpoints/{{ k.id }}/delete" data-confirm="ลบโซน {{ k.code }}"><button class="btn small danger">ลบโซนนี้</button></form></div>
+    {% else %}<p class="muted">ยังไม่มีโซน จุดนี้ใช้รายการตรวจทั่วไป</p>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}

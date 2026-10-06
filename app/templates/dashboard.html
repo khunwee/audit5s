@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}ภาพรวม 5ส{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>ภาพรวม 5ส</h1>{% if rnd %}<p>{{ rnd.name }}{% if d %}, {{ d.n_photos }} ภาพที่นับคะแนน, เกณฑ์ฉบับที่ {{ rnd.rule_rev or 0 }}{% endif %}</p>{% endif %}</div>
+  <div class="actions no-print"><a class="btn small quiet" href="/ranking{{ '?round=' ~ rnd.id if rnd }}">อันดับ</a><a class="btn small quiet" href="/trend">แนวโน้มข้ามรอบ</a></div></div>
+{% if not rnd %}
+  <div class="empty"><h2>ยังไม่มีรอบการตรวจ</h2><p>ภาพรวมจะขึ้นเมื่อมีรอบการตรวจและภาพได้รับคะแนน</p></div>
+{% else %}
+<form method="get" class="filters no-print" data-autosubmit>
+  <label class="field"><span>รอบการตรวจ</span><select name="round">{% for r in rounds %}<option value="{{ r.id }}"{{ ' selected' if r.id == rnd.id }}>{{ r.name }}</option>{% endfor %}</select></label>
+</form>
+{% if not allowed %}
+  <div class="empty"><h2>ภาพรวมของรอบนี้ยังไม่เปิดให้ดู</h2><p>เปิดให้ดูเมื่อปิดรอบ หรือเมื่อได้รับสิทธิ์ดูผลของทุกแผนก</p></div>
+{% else %}
+<div class="stack">
+  <div class="tiles">
+    <div class="tile good"><b>{{ d.bands.good }}</b><span>แผนกสีเขียว ตั้งแต่ {{ settings.band_good }}%</span></div>
+    <div class="tile mid"><b>{{ d.bands.mid }}</b><span>แผนกสีเหลือง {{ settings.band_mid }} ถึง {{ settings.band_good - 1 }}%</span></div>
+    <div class="tile low"><b>{{ d.bands.low }}</b><span>แผนกสีแดง ต่ำกว่า {{ settings.band_mid }}%</span></div>
+    <a class="tile ink" href="/actions?status=open" style="text-decoration:none;color:inherit"><b>{{ d.actions.open }}</b><span>งานแก้ไขเปิดอยู่</span></a>
+    <a class="tile low" href="/actions?status=overdue" style="text-decoration:none;color:inherit"><b>{{ d.actions.overdue }}</b><span>งานแก้ไขเกินกำหนด</span></a>
+  </div>
+
+  <div class="cols cols-2">
+    <section class="panel">
+      <h2>คะแนนเฉลี่ยรายหมวด ทั้งโรงงาน</h2>
+      {% for c in d.ranking.rubric %}
+      <div class="crit"><div class="crit-head"><h3>{{ c.name }}</h3><span class="crit-score">{{ d.cats[c.code]|num }}{{ '%' if d.cats[c.code] is not none }}</span></div>{{ m.bar(d.cats[c.code]) }}</div>
+      {% endfor %}
+    </section>
+    <section class="panel">
+      <h2>ข้อที่ไม่ผ่านบ่อยที่สุด</h2>
+      {% if not d.checklist %}<p class="muted">รอบนี้ใช้โหมดระดับ 0 ถึง 4 จึงไม่มีผลรายข้อ สร้างรอบในโหมดรายการตรวจเพื่อดูว่าข้อใดไม่ผ่านบ่อย</p>
+      {% elif not d.pareto %}<p class="muted">ยังไม่พบข้อที่ไม่ผ่านในรอบนี้</p>
+      {% else %}
+      <ol class="pareto">
+        {% for e in d.pareto %}
+        <li><b>{{ e.code }}</b> {{ e.text }}<br><span class="muted">{{ e.count }} ครั้ง ใน {{ e.areas }} จุดตรวจ (มาก {{ e.major }}, เล็กน้อย {{ e.minor }})</span>
+          <span class="pbar"><i class="mj" style="width:{{ e.major / d.max_count * 100 }}%"></i><i class="mn" style="width:{{ e.minor / d.max_count * 100 }}%"></i></span></li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if d.repeats %}
+  <section>
+    <h2 style="margin-bottom:8px">ข้อที่พบซ้ำจากรอบก่อน</h2>
+    <div class="table-wrap"><table>
+      <tr><th>แผนก</th><th>จุดตรวจ</th><th>ข้อที่พบซ้ำ</th><th></th></tr>
+      {% for x in d.repeats %}<tr><td>{{ x.dept }}</td><td>{{ x.area }}</td><td>{{ x.text }}</td><td><a href="/photos/{{ x.photo.id }}">ดูภาพ</a></td></tr>{% endfor %}
+    </table></div>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2 style="margin-bottom:8px">รายแผนก</h2>
+    <div class="table-wrap"><table>
+      <tr><th>แผนก</th><th class="r">คะแนน</th><th class="r">ภาพ</th><th class="r">รอยืนยัน</th><th class="r">จุดตรวจบังคับ</th><th class="r">งานเปิดอยู่</th><th class="r">เกินกำหนด</th></tr>
+      {% for r in d.rows %}{% set ac = d.act_by_dept.get(r.dept.id, {'open': 0, 'overdue': 0}) %}
+      <tr><td><a href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">{{ r.dept.name }}</a></td><td class="r">{{ m.tag(r.avg) }}</td><td class="r">{{ r.scored }}</td><td class="r">{{ r.unverified }}</td>
+        <td class="r">{% if r.areas_required %}{{ r.areas_covered }}/{{ r.areas_required }}{% else %}-{% endif %}</td><td class="r">{{ ac.open }}</td><td class="r">{{ ac.overdue }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </section>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

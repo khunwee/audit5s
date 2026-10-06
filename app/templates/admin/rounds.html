@@ -13,6 +13,11 @@
         <label class="field"><span>วันสิ้นสุด</span><input type="date" name="end_date"></label>
       </div>
       <label class="field"><span>จำนวนภาพขั้นต่ำต่อแผนก <em>แผนกที่ภาพไม่ถึงจะยังไม่ถูกจัดอันดับ</em></span><input type="number" name="min_photos" value="3" min="1" max="200"></label>
+      <label class="field"><span>วิธีให้คะแนนของรอบนี้ <em>เปลี่ยนภายหลังไม่ได้</em></span>
+        <select name="mode">
+          <option value="checklist"{{ ' selected' if settings.scoring_mode == 'checklist' }}>รายการตรวจ: AI ตรวจทีละข้อ ระบบคิดคะแนนตามกติกา</option>
+          <option value="level"{{ ' selected' if settings.scoring_mode != 'checklist' }}>ระดับ 0 ถึง 4: AI เลือกระดับของแต่ละหมวด</option>
+        </select></label>
       <label class="field"><span>หมายเหตุ <em>ไม่บังคับ</em></span><textarea name="note" maxlength="1000"></textarea></label>
       <p class="muted">รอบใหม่จะใช้เกณฑ์ชุดปัจจุบัน {{ n_criteria }} ข้อ <a href="/admin/criteria">ดูเกณฑ์</a></p>
       <button class="btn primary">สร้างรอบการตรวจ</button>
@@ -28,7 +33,7 @@
 <section class="panel" style="margin-top:14px">
   <div class="split">
     <div><h2>{{ r.name }}</h2>
-      <p class="muted" style="margin:2px 0 0">{{ r.start_date|d }} ถึง {{ r.end_date|d }}, ขั้นต่ำ {{ r.min_photos }} ภาพต่อแผนก, {{ st.photos }} ภาพ (เก็บภาพเต็ม {{ st.images }} ภาพ)
+      <p class="muted" style="margin:2px 0 0">{{ 'โหมดรายการตรวจ' if r.mode == 'checklist' else 'โหมดระดับ 0 ถึง 4' }}, เกณฑ์ฉบับที่ {{ r.rule_rev or 0 }}, {{ r.start_date|d }} ถึง {{ r.end_date|d }}, ขั้นต่ำ {{ r.min_photos }} ภาพต่อแผนก, {{ st.photos }} ภาพ (เก็บภาพเต็ม {{ st.images }} ภาพ)
         {% if r.last_backup_at %}, สำรองล่าสุด {{ r.last_backup_at|dt }}{% else %}, ยังไม่เคยสำรอง{% endif %}</p></div>
     <span class="chip {{ 'chip-done' if r.status == 'open' else 'chip-plain' }}">{{ 'เปิดรับภาพ' if r.status == 'open' else 'ปิดรอบแล้ว' }}</span>
   </div>

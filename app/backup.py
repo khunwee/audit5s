@@ -226,6 +226,82 @@ def photos_csv(db, rnd: Round, dept_id: int = 0) -> bytes:
     return _csv(rows)
 
 
+def checks_csv(db, rnd: Round, dept_id: int = 0) -> bytes:
+    """ผลรายข้อของโหมดรายการตรวจ: 1 แถวต่อ 1 ข้อของ 1 ภาพ ใช้ทำ Pareto หรือวิเคราะห์ต่อ"""
+    from .rules import STATUS as CHECK_STATUS
+    q = db.query(Photo).filter(Photo.round_id == rnd.id)
+    if dept_id:
+        q = q.filter(Photo.department_id == dept_id)
+    rows = [["เลขที่ภาพ", "รหัสแผนก", "แผนก", "จุดตรวจ", "วันที่ส่ง", "หมวด", "รหัสข้อ", "รายการตรวจ", "ผล", "แต้มที่ได้", "แต้มเต็ม",
+             "สิ่งที่เห็น", "สิ่งที่ควรทำ", "ผลที่ AI เสนอ", "กรรมการแก้ไข", "พบซ้ำจากรอบก่อน", "เป็นโซน", "ยืนยันโดย"]]
+    for p in q.order_by(Photo.department_id, Photo.id).all():
+        for x in (p.analysis or {}).get("checks", []):
+            ai_status = x.get("ai_status", x.get("status"))
+            rows.append([p.id, p.department.code, p.department.name, p.area_name, f_dt(p.created_at), x.get("crit", ""),
+                         x["code"], x["text"], CHECK_STATUS.get(x["status"], x["status"]),
+                         "" if x["status"] == "na" else x.get("points", 0), "" if x["status"] == "na" else x.get("max", 0),
+                         x.get("evidence", ""), x.get("action", ""), CHECK_STATUS.get(ai_status, ai_status or ""),
+                         "ใช่" if ai_status != x["status"] else "", "ใช่" if x.get("repeat") else "",
+                         "ใช่" if x.get("zone") else "", p.verified_by or ""])
+    return _csv(rows)
+
+
+def actions_csv(db, dept_id: int = 0) -> bytes:
+    from .db import Action
+    q = db.query(Action)
+    if dept_id:
+        q = q.filter(Action.department_id == dept_id)
+    rows = [["เลขที่งาน", "แผนก", "จุดตรวจ", "งานแก้ไข", "ระดับ", "ผู้รับผิดชอบ", "กำหนดเสร็จ", "สถานะ", "สร้างเมื่อ", "สร้างโดย",
+             "ปิดเมื่อ", "ปิดโดย", "หมายเหตุการปิด", "ภาพที่พบ", "รหัสข้อ", "ภาพหลังแก้ไข"]]
+    for a in q.order_by(Action.status.desc(), Action.due_date, Action.id).all():
+        rows.append([a.id, a.department.name, a.area_name, a.title, "บกพร่องมาก" if a.severity == "major" else "บกพร่องเล็กน้อย",
+                     a.pic or "", f_date(a.due_date) if a.due_date else "", "เปิดอยู่" if a.status == "open" else "ปิดแล้ว",
+                     f_dt(a.created_at), a.created_by or "", f_dt(a.closed_at) if a.closed_at else "", a.closed_by or "",
+                     a.close_note or "", a.photo_id or "", a.check_code or "", a.after_photo_id or ""])
+    return _csv(rows)
+
+
+def build_dataset_zip(db, rnd: Round, path: str) -> int:
+    """ชุดข้อมูลจากภาพที่คนยืนยันผลแล้ว สำหรับฝึกโมเดลตรวจจับ (เช่น YOLO หรือ CiRA Core) ในภายหลัง
+
+    สถานะรายข้อผ่านการยืนยันของคนแล้ว ส่วนกรอบ box เป็นกรอบที่ AI เสนอ ยังไม่ได้ให้คนแก้ตำแหน่ง ต้องตรวจก่อนใช้ฝึก
+    """
+    photos = (db.query(Photo).filter(Photo.round_id == rnd.id, Photo.status == "done", Photo.verified_at.isnot(None),
+                                     Photo.has_image.is_(True)).order_by(Photo.id).all())
+    n, classes = 0, {}
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
+        lines = []
+        for p in photos:
+            a = p.analysis or {}
+            if a.get("mode") != "checklist":
+                continue
+            blob = db.get(PhotoImage, p.id)
+            if blob is None:
+                continue
+            name = f"images/{p.id}.jpg"
+            z.writestr(name, blob.data)
+            db.expunge(blob)
+            for x in a.get("checks", []):
+                classes[x["code"]] = x["text"]
+            lines.append(json.dumps(dict(
+                image=name, photo_id=p.id, width=p.width, height=p.height, area=p.area_name, area_type=p.area_type,
+                source=p.source, verified_by=p.verified_by, verified_at=_iso(p.verified_at),
+                checks=[dict(code=x["code"], status=x["status"], ai_status=x.get("ai_status", x["status"]),
+                             box=x.get("box"), zone=bool(x.get("zone"))) for x in a.get("checks", [])]), ensure_ascii=False))
+            n += 1
+        z.writestr("labels.jsonl", "\n".join(lines), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr("classes.json", json.dumps(classes, ensure_ascii=False, indent=1), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr("README.txt",
+                   "5S Vision dataset export\n"
+                   "labels.jsonl : one JSON object per image\n"
+                   "  checks[].status    = final status confirmed by a person: ok | minor | major | na\n"
+                   "  checks[].ai_status = what the AI proposed before confirmation\n"
+                   "  checks[].box       = [x1, y1, x2, y2] on a 0-1000 scale of image width and height, or null\n"
+                   "Boxes are AI-proposed and were NOT corrected by a person. Review them before training a detector.\n"
+                   "classes.json : checkpoint code -> the compliant condition it checks\n")
+    return n
+
+
 def round_json(db, rnd: Round) -> bytes:
     rk = scoring.round_ranking(db, rnd)
 
@@ -267,6 +343,7 @@ def build_round_zip(db, rnd: Round, path: str, user=None) -> dict:
             format=FORMAT, app_version=config.APP_VERSION, exported_at=_iso(now()),
             round=dict(name=rnd.name, note=rnd.note, start_date=_iso(rnd.start_date), end_date=_iso(rnd.end_date),
                        status=rnd.status, min_photos=rnd.min_photos, rubric=rnd.rubric,
+                       mode=rnd.mode or "level", checklist=rnd.checklist, rule_rev=rnd.rule_rev or 0,
                        created_at=_iso(rnd.created_at), closed_at=_iso(rnd.closed_at)),
             departments=[dict(code=d.code, name=d.name, zone=d.zone) for d in depts.values()],
             photos=[dict(photo_dict(p), file=files.get(p.id)) for p in photos],
@@ -311,7 +388,8 @@ def restore_round_zip(db, fileobj, user=None) -> Round:
     if db.query(Round).filter(Round.name == name).first():
         name = f"{name} (นำกลับ {f_dt(now())})"
     rnd = Round(name=name[:160], note=r.get("note") or "", status="closed", min_photos=int(r.get("min_photos") or 1),
-                rubric=r.get("rubric") or [], closed_at=_dt(r.get("closed_at")) or now(),
+                rubric=r.get("rubric") or [], mode=r.get("mode") or "level", checklist=r.get("checklist"),
+                rule_rev=int(r.get("rule_rev") or 0), closed_at=_dt(r.get("closed_at")) or now(),
                 created_at=_dt(r.get("created_at")) or now(), last_backup_at=now(),
                 start_date=_dt(r.get("start_date")).date() if _dt(r.get("start_date")) else None,
                 end_date=_dt(r.get("end_date")).date() if _dt(r.get("end_date")) else None)

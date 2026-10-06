@@ -14,6 +14,16 @@
 <span class="bar"><span class="bar-fill bar-{{ band(pct) }}" style="width: {{ pct or 0 }}%"></span></span>
 {%- endmacro %}
 
+{# ภาพหลักฐานพร้อมกรอบ: กรอบน้ำเงิน = โซนที่โรงงานกำหนด, กรอบแดงหรือเหลือง = จุดที่ทำให้ข้อนั้นไม่ผ่าน #}
+{% macro shot(p, src, alt='') -%}
+{% set a = p.analysis or {} %}
+<span class="shot-wrap"><img src="{{ src }}" alt="{{ alt or ('ภาพจุดตรวจ ' ~ p.area_name) }}">
+{%- if p.status == 'done' and a.mode == 'checklist' %}
+{%- for x in a.checks or [] %}{% if x.zone %}<span class="zbox" style="left:{{ x.zone[0] / 10 }}%;top:{{ x.zone[1] / 10 }}%;width:{{ (x.zone[2] - x.zone[0]) / 10 }}%;height:{{ (x.zone[3] - x.zone[1]) / 10 }}%"><b>{{ x.code }}</b></span>{% endif %}{% endfor %}
+{%- for x in a.checks or [] %}{% if x.box and x.status in ('minor', 'major') %}<span class="fbox fbox-{{ x.status }}" style="left:{{ x.box[0] / 10 }}%;top:{{ x.box[1] / 10 }}%;width:{{ (x.box[2] - x.box[0]) / 10 }}%;height:{{ (x.box[3] - x.box[1]) / 10 }}%"><b>{{ x.code }}</b></span>{% endif %}{% endfor %}
+{%- endif %}</span>
+{%- endmacro %}
+
 {# ผลวิเคราะห์ของภาพหนึ่งใบ: ใช้ทั้งหน้ารายละเอียดภาพและรายงาน #}
 {% macro analysis(p, compact=false) %}
 {% set a = p.analysis or {} %}
@@ -26,17 +36,35 @@
 {% else %}
   {% if a.scene and not compact %}<p><b>สิ่งที่เห็นในภาพ</b> {{ a.scene }}</p>{% endif %}
   {% if a.summary %}<p><b>สรุป</b> {{ a.summary }}</p>{% endif %}
-  {% if p.overridden %}<p class="note">กรรมการปรับคะแนนภาพนี้ โดย {{ p.override_by }} เมื่อ {{ p.override_at|dt }} เหตุผล: {{ p.override_note }}</p>{% endif %}
+  {% if p.overridden %}<p class="note">กรรมการปรับผลของภาพนี้ โดย {{ p.override_by }} เมื่อ {{ p.override_at|dt }} เหตุผล: {{ p.override_note }}</p>{% endif %}
   {% for c in a.criteria or [] %}
   <div class="crit">
     <div class="crit-head">
       <h3>{{ c.name }}</h3>
-      {{ levels(c) }}{% if c.seen %}<span class="chip chip-plain" title="AI ประเมินสองรอบได้ผลต่างกัน ระบบยึดระดับที่ต่ำกว่า">สองรอบได้ {{ c.seen }}</span>{% endif %}
+      {% if a.mode == 'checklist' %}{% if c.computed %}<span class="chip chip-plain" title="หมวดนี้ไม่ได้ดูจากภาพ ระบบคำนวณจากข้อที่พบซ้ำและงานแก้ไขที่เกินกำหนด">ระบบคำนวณ</span>{% endif %}
+      {% else %}{{ levels(c) }}{% if c.seen %}<span class="chip chip-plain" title="AI ประเมินสองรอบได้ผลต่างกัน ระบบยึดระดับที่ต่ำกว่า">สองรอบได้ {{ c.seen }}</span>{% endif %}{% endif %}
       <span class="crit-score">{% if c.na %}ไม่คิดคะแนน{% else %}{{ c.score|num }} / {{ c.max|num }}{% endif %}</span>
     </div>
-    {% if c.reason %}<p>{{ c.reason }}</p>{% endif %}
-    {% if c.findings and not compact %}<span class="lbl">สิ่งที่พบ</span><ul>{% for x in c.findings %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
-    {% if c.recommendations %}<span class="lbl">ควรทำ</span><ul>{% for x in c.recommendations %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.mode == 'checklist' %}
+      {% if c.reason %}<p class="muted">{{ c.reason }}</p>{% endif %}
+      {% if c.computed and c.findings %}<ul>{% for x in c.findings %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+      <ul class="checks">
+      {% for x in a.checks or [] %}{% if x.crit == c.code and (x.status in ('minor', 'major') or not compact) %}
+        <li class="ck ck-{{ x.status }}"><span class="ck-st">{{ CHECK_STATUS[x.status] }}</span>
+          <span class="ck-body"><b>{{ x.code }}</b> {{ x.text }}
+            {%- if x.repeat %} <span class="chip chip-error">พบซ้ำจากรอบก่อน</span>{% endif %}
+            {%- if x.changed and x.ai_status %} <span class="chip chip-plain">กรรมการแก้จาก {{ CHECK_STATUS[x.ai_status] }}</span>{% endif %}
+            {%- if x.seen %} <span class="chip chip-plain" title="AI ตรวจสองรอบได้ผลต่างกัน ระบบยึดผลที่แย่กว่า">สองรอบได้ {{ x.seen }}</span>{% endif %}
+            {%- if x.status in ('minor', 'major') %}{% if x.evidence %}<br>{{ x.evidence }}{% endif %}{% if x.action %}<br><span class="ck-do">ควรทำ: {{ x.action }}</span>{% endif %}
+            {%- elif x.evidence and not compact %}<br><span class="muted">{{ x.evidence }}</span>{% endif %}</span>
+          <span class="num">{% if x.status != 'na' %}{{ x.points|num }}/{{ x.max|num }}{% endif %}</span></li>
+      {% endif %}{% endfor %}
+      </ul>
+    {% else %}
+      {% if c.reason %}<p>{{ c.reason }}</p>{% endif %}
+      {% if c.findings and not compact %}<span class="lbl">สิ่งที่พบ</span><ul>{% for x in c.findings %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+      {% if c.recommendations %}<span class="lbl">ควรทำ</span><ul>{% for x in c.recommendations %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    {% endif %}
   </div>
   {% endfor %}
 {% endif %}

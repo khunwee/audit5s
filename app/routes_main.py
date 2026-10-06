@@ -4,8 +4,9 @@ import time
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import ai, backup, cameras, config, notify, photos as intake, scoring, security, settings_store, storage, worker
-from .db import (AuditArea, Camera, Department, DeptSummary, Photo, PhotoImage, PhotoThumb, Round, User, get_db,
+from . import (actions as act_mod, ai, backup, cameras, config, notify, photos as intake, rules, scoring, security,
+               settings_store, storage, worker)
+from .db import (Action, AuditArea, Camera, Department, DeptSummary, Photo, PhotoImage, PhotoThumb, Round, User, get_db,
                  log, now)
 from .security import can, current_user, dept_ids, need
 from .web import flash, render
@@ -343,8 +344,124 @@ def photo_detail(pid: int, request: Request, user=Depends(current_user), db=Depe
     before = db.get(Photo, p.after_of) if p.after_of else None
     after = db.query(Photo).filter(Photo.after_of == p.id).order_by(Photo.id.desc()).first()
     can_fix = rnd.status == "open" and p.department_id in [d.id for d in upload_depts(user, db)]
+    checklist = rules.applicable(rnd.checklist or [], rnd.rubric or [], p) if (rnd.mode or "level") == "checklist" else []
     return render(request, "photo.html", user, db, p=p, rnd=rnd, deletable=can_delete(user, p, rnd),
-                  before=before, after=after, can_fix=can_fix, can_verify=may_verify(user, p))
+                  before=before, after=after, can_fix=can_fix, can_verify=may_verify(user, p),
+                  checklist=checklist, zones=rules.zones_of(checklist),
+                  actions=db.query(Action).filter(Action.photo_id == p.id).order_by(Action.id).all(),
+                  can_act=can_manage_actions(user, p.department_id), today=act_mod.today())
+
+
+def can_manage_actions(user: User, dept_id: int) -> bool:
+    """งานแก้ไขจัดการได้โดยคนของแผนกนั้น และโดยผู้ที่มีสิทธิ์ยืนยันผล"""
+    return can(user, "score") or dept_id in dept_ids(user)
+
+
+# --------------------------------------------------------------------------- งานแก้ไข
+@router.get("/actions", response_class=HTMLResponse)
+def actions_page(request: Request, dept: int = 0, status: str = "open", user=Depends(current_user), db=Depends(get_db)):
+    s = settings_store.load()
+    depts = db.query(Department).order_by(Department.name).all()
+    limited = not can_view_dept(user, -1, s)
+    if limited:
+        depts = [d for d in depts if d.id in dept_ids(user)]
+        if dept not in dept_ids(user):
+            dept = 0
+    q = db.query(Action)
+    if limited:
+        q = q.filter(Action.department_id.in_(dept_ids(user) or {-1}))
+    if dept:
+        q = q.filter(Action.department_id == dept)
+    day = act_mod.today()
+    counts = dict(open=q.filter(Action.status == "open").count(),
+                  overdue=q.filter(Action.status == "open", Action.due_date.isnot(None), Action.due_date < day).count(),
+                  done=q.filter(Action.status == "done").count())
+    if status == "overdue":
+        q = q.filter(Action.status == "open", Action.due_date.isnot(None), Action.due_date < day)
+    elif status in ("open", "done"):
+        q = q.filter(Action.status == status)
+    items = q.order_by(Action.status.desc(), Action.due_date.asc().nulls_last(), Action.id.desc()).limit(200).all()
+    return render(request, "actions.html", user, db, items=items, depts=depts, dept=dept, status=status, counts=counts,
+                  today=day, mine=dept_ids(user), can_score=can(user, "score"))
+
+
+@router.post("/actions/save")
+def action_save(request: Request, form=Depends(form_data), user=Depends(current_user), db=Depends(get_db)):
+    from datetime import date as _date
+    aid = int(form.get("id") or 0)
+    act = db.get(Action, aid) if aid else None
+    if act is None:
+        p = db.get(Photo, int(form.get("photo_id") or 0))
+        if p is None:
+            raise HTTPException(400, "งานแก้ไขต้องอ้างถึงภาพที่พบข้อบกพร่อง")
+        act = Action(round_id=p.round_id, department_id=p.department_id, area_name=p.area_name, photo_id=p.id,
+                     created_by=user.full_name or user.username, severity="minor", title="")
+        db.add(act)
+    if not can_manage_actions(user, act.department_id):
+        raise HTTPException(403, "งานแก้ไขนี้เป็นของแผนกอื่น")
+    title = (form.get("title") or act.title or "").strip()[:400]
+    if not title:
+        flash(request, "ใส่รายละเอียดของงานแก้ไข", "err")
+        return RedirectResponse(request.headers.get("referer") or "/actions", 303)
+    act.title = title
+    act.pic = (form.get("pic") or "").strip()[:120]
+    try:
+        act.due_date = _date.fromisoformat(form.get("due_date")) if form.get("due_date") else act.due_date
+    except ValueError:
+        pass
+    if form.get("severity") in ("minor", "major"):
+        act.severity = form.get("severity")
+    log(db, user, "save_action", f"{act.area_name}: {title[:120]} ผู้รับผิดชอบ {act.pic or '-'} กำหนด {act.due_date or '-'}")
+    db.commit()
+    flash(request, "บันทึกงานแก้ไขแล้ว")
+    return RedirectResponse(request.headers.get("referer") or "/actions", 303)
+
+
+@router.post("/actions/{aid}/{what}")
+def action_change(aid: int, what: str, request: Request, form=Depends(form_data), user=Depends(current_user),
+                  db=Depends(get_db)):
+    act = db.get(Action, aid)
+    if act is None:
+        raise HTTPException(404, "ไม่พบงานแก้ไขนี้")
+    if not can_manage_actions(user, act.department_id):
+        raise HTTPException(403, "งานแก้ไขนี้เป็นของแผนกอื่น")
+    if what == "close":
+        note = (form.get("note") or "").strip()[:1000]
+        if len(note) < 3:
+            flash(request, "ใส่สิ่งที่ได้ทำเพื่อปิดงาน", "err")
+        else:
+            act.status, act.closed_at, act.closed_by, act.close_note = "done", now(), user.full_name or user.username, note
+            log(db, user, "close_action", f"งาน {act.id} {act.area_name}: {note[:200]}")
+            flash(request, "ปิดงานแก้ไขแล้ว")
+    elif what == "reopen":
+        if not can(user, "score"):
+            raise HTTPException(403, "การเปิดงานที่ปิดแล้วต้องมีสิทธิ์ยืนยันผล")
+        act.status, act.closed_at, act.closed_by = "open", None, ""
+        log(db, user, "reopen_action", f"งาน {act.id} {act.area_name}")
+        flash(request, "เปิดงานแก้ไขอีกครั้ง")
+    else:
+        raise HTTPException(404, "ไม่รู้จักคำสั่งนี้")
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/actions", 303)
+
+
+@router.get("/actions.csv")
+def actions_export(dept: int = 0, user=Depends(need("export")), db=Depends(get_db)):
+    return Response(backup.actions_csv(db, dept), media_type="text/csv; charset=utf-8",
+                    headers=download("5S_งานแก้ไข.csv", "5S_actions.csv"))
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page(request: Request, round: int = 0, user=Depends(current_user), db=Depends(get_db)):
+    s = settings_store.load()
+    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rnd = db.get(Round, round) if round else active_round(db)
+    data, allowed = None, False
+    if rnd:
+        allowed = can_rank(user, rnd, s) and can_view_dept(user, -1, s)
+        if allowed:
+            data = scoring.dashboard(db, rnd)
+    return render(request, "dashboard.html", user, db, rounds=rounds, rnd=rnd, d=data, allowed=allowed)
 
 
 def may_verify(user: User, p: Photo) -> bool:
@@ -406,6 +523,7 @@ def photo_delete(pid: int, request: Request, user=Depends(current_user), db=Depe
     db.query(PhotoImage).filter(PhotoImage.photo_id == p.id).delete()
     db.query(PhotoThumb).filter(PhotoThumb.photo_id == p.id).delete()
     db.query(Photo).filter(Photo.after_of == p.id).update({"after_of": None})
+    db.query(Action).filter(Action.photo_id == p.id).update({"photo_id": None})
     log(db, user, "delete_photo", f"ภาพ {p.id} {p.department.name} / {p.area_name}")
     db.delete(p)
     db.commit()
@@ -471,6 +589,7 @@ EXPORTS = {
     "ranking.csv": ("text/csv; charset=utf-8", "5S_{name}_อันดับ.csv"),
     "photos.csv": ("text/csv; charset=utf-8", "5S_{name}_รายภาพ.csv"),
     "data.json": ("application/json", "5S_{name}.json"),
+    "checks.csv": ("text/csv; charset=utf-8", "5S_{name}_รายข้อ.csv"),
 }
 
 
@@ -485,12 +604,37 @@ def export(rid: int, kind: str, dept: int = 0, user=Depends(need("export")), db=
         data = backup.ranking_csv(db, rnd)
     elif kind == "photos.csv":
         data = backup.photos_csv(db, rnd, dept)
+    elif kind == "checks.csv":
+        data = backup.checks_csv(db, rnd, dept)
     else:
         data = backup.round_json(db, rnd)
     log(db, user, "export", f"{rnd.name}: {kind}")
     db.commit()
     mime, pattern = EXPORTS[kind]
     return Response(data, media_type=mime, headers=download(pattern.format(name=rnd.name), f"5S_round_{rid}_{kind}"))
+
+
+@router.get("/rounds/{rid}/dataset.zip")
+def dataset_export(rid: int, user=Depends(need("export")), db=Depends(get_db)):
+    """ภาพที่ยืนยันผลแล้วพร้อมป้ายกำกับ สำหรับฝึกโมเดลตรวจจับในภายหลัง"""
+    import os
+    import tempfile
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+    rnd = db.get(Round, rid)
+    if rnd is None:
+        raise HTTPException(404, "ไม่พบรอบการตรวจนี้")
+    fd, path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        n = backup.build_dataset_zip(db, rnd, path)
+    except Exception:
+        os.unlink(path)
+        raise
+    log(db, user, "export", f"{rnd.name}: dataset {n} ภาพ")
+    db.commit()
+    return FileResponse(path, media_type="application/zip", background=BackgroundTask(os.unlink, path),
+                        headers=download(f"5S_{rnd.name}_dataset.zip", f"5S_round_{rid}_dataset.zip"))
 
 
 def trend_data(db, limit: int = 8) -> dict:

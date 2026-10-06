@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "5ส Vision"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))

@@ -12,8 +12,9 @@ from PIL import Image, ImageDraw
 from sqlalchemy import case, func
 from starlette.background import BackgroundTask
 
-from . import ai, backup, cameras, config, notify, scoring, security, settings_store, storage, worker
-from .db import (DEFAULT_CRITERIA, AuditArea, AuditLog, Camera, Channel, Criterion, Department, DeptSummary, NotifyEvent,
+from . import (actions as act_mod, ai, backup, cameras, config, notify, rules, scoring, security, settings_store,
+               storage, worker)
+from .db import (DEFAULT_CRITERIA, Action, AuditArea, AuditLog, Camera, Checkpoint, checklist_snapshot, seed_checkpoints, Channel, Criterion, Department, DeptSummary, NotifyEvent,
                  NotifyLog, Photo, PhotoImage, PhotoThumb, Round, User, get_db, log, now, rubric_snapshot)
 from .photos import area_types
 from .routes_main import download, form_data, may_verify
@@ -37,6 +38,17 @@ def _int(v, default=0, lo=None, hi=None):
     if hi is not None:
         n = min(hi, n)
     return n
+
+
+def bump_rule_rev(db) -> int:
+    """ทุกการแก้เกณฑ์หรือรายการตรวจ = เกณฑ์ฉบับใหม่ รอบการตรวจบันทึกเลขฉบับที่ใช้ไว้"""
+    rev = int(settings_store.load().get("_rule_rev", 0) or 0) + 1
+    settings_store.save(db, {"_rule_rev": rev})
+    return rev
+
+
+RULE_ACTIONS = ("save_criterion", "delete_criterion", "reset_criteria", "save_checkpoint", "delete_checkpoint",
+                "reset_checkpoints", "save_zone", "delete_zone")
 
 
 def _date(v):
@@ -96,9 +108,16 @@ def round_save(request: Request, form=Depends(form_data), user=Depends(need("rou
         if not rubric:
             flash(request, "ยังไม่มีเกณฑ์ที่เปิดใช้ ตั้งเกณฑ์ก่อนสร้างรอบ", "err")
             return back("/admin/criteria" if can(user, "criteria") else "/admin/rounds")
-        rnd = Round(rubric=rubric, status="open")
+        s = settings_store.load()
+        mode = form.get("mode") if form.get("mode") in ("level", "checklist") else s.get("scoring_mode", "level")
+        checklist = checklist_snapshot(db) if mode == "checklist" else None
+        if mode == "checklist" and not checklist:
+            flash(request, "โหมดรายการตรวจต้องมีรายการตรวจที่เปิดใช้อย่างน้อย 1 ข้อ", "err")
+            return back("/admin/checkpoints" if can(user, "criteria") else "/admin/rounds")
+        rnd = Round(rubric=rubric, status="open", mode=mode, checklist=checklist,
+                    rule_rev=int(s.get("_rule_rev", 0) or 0))
         db.add(rnd)
-        log(db, user, "create_round", name)
+        log(db, user, "create_round", f"{name} ({'รายการตรวจ' if mode == 'checklist' else 'ระดับ 0-4'}, เกณฑ์ฉบับที่ {rnd.rule_rev})")
     rnd.name = name
     rnd.note = (form.get("note") or "").strip()[:1000]
     rnd.start_date, rnd.end_date = _date(form.get("start_date")), _date(form.get("end_date"))
@@ -140,6 +159,9 @@ def round_action(rid: int, action: str, request: Request, user=Depends(current_u
     elif action in ("reanalyze", "retry-errors", "sync-rubric"):
         if action == "sync-rubric":
             rnd.rubric = rubric_snapshot(db)
+            rnd.rule_rev = int(settings_store.load().get("_rule_rev", 0) or 0)
+            if (rnd.mode or "level") == "checklist":
+                rnd.checklist = checklist_snapshot(db)
         target = q.filter(Photo.has_image.is_(True))
         if action == "retry-errors":
             target = target.filter(Photo.status == "error")
@@ -204,7 +226,9 @@ def round_excel(rid: int):
 def criteria_page(request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
     items = db.query(Criterion).order_by(Criterion.sort_order, Criterion.id).all()
     total = sum(c.max_score for c in items if c.active)
-    return render(request, "admin/criteria.html", user, db, items=items, total=total)
+    history = (db.query(AuditLog).filter(AuditLog.action.in_(RULE_ACTIONS)).order_by(AuditLog.id.desc()).limit(15).all())
+    return render(request, "admin/criteria.html", user, db, items=items, total=total, history=history,
+                  rule_rev=int(settings_store.load().get("_rule_rev", 0) or 0))
 
 
 @router.post("/criteria/save")
@@ -235,7 +259,9 @@ def criteria_save(request: Request, form=Depends(form_data), user=Depends(need("
     c.allow_na = form.get("allow_na") == "1"
     c.active = form.get("active") == "1"
     c.sort_order = _int(form.get("sort_order"), 100)
-    log(db, user, "save_criterion", f"{code} {name} เต็ม {max_score}")
+    c.kind = "sustain" if form.get("kind") == "sustain" else "ai"
+    rev = bump_rule_rev(db)
+    log(db, user, "save_criterion", f"ฉบับที่ {rev}: {code} {name} เต็ม {max_score}")
     db.commit()
     flash(request, f"บันทึกเกณฑ์ {name} แล้ว มีผลกับรอบที่สร้างใหม่")
     return back("/admin/criteria")
@@ -245,7 +271,7 @@ def criteria_save(request: Request, form=Depends(form_data), user=Depends(need("
 def criteria_delete(cid: int, request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
     c = db.get(Criterion, cid)
     if c is not None:
-        log(db, user, "delete_criterion", f"{c.code} {c.name}")
+        log(db, user, "delete_criterion", f"ฉบับที่ {bump_rule_rev(db)}: {c.code} {c.name}")
         db.delete(c)
         db.commit()
         flash(request, f"ลบเกณฑ์ {c.name} แล้ว (รอบที่ตรวจไปแล้วยังใช้เกณฑ์ชุดเดิม)")
@@ -257,10 +283,144 @@ def criteria_reset(request: Request, user=Depends(need("criteria")), db=Depends(
     db.query(Criterion).delete()
     for i, c in enumerate(DEFAULT_CRITERIA):
         db.add(Criterion(sort_order=(i + 1) * 10, **c))
-    log(db, user, "reset_criteria")
+    log(db, user, "reset_criteria", f"ฉบับที่ {bump_rule_rev(db)}")
     db.commit()
     flash(request, "คืนค่าเกณฑ์ตั้งต้น 5 ข้อแล้ว")
     return back("/admin/criteria")
+
+
+# --------------------------------------------------------------------------- รายการตรวจ (rule engine)
+@router.get("/checkpoints", response_class=HTMLResponse)
+def checkpoints_page(request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
+    crits = db.query(Criterion).order_by(Criterion.sort_order, Criterion.id).all()
+    items = {}
+    for k in db.query(Checkpoint).filter(Checkpoint.area_id.is_(None)).order_by(Checkpoint.sort_order, Checkpoint.id).all():
+        items.setdefault(k.crit_code, []).append(k)
+    zones = db.query(Checkpoint).filter(Checkpoint.area_id.isnot(None)).count()
+    s = settings_store.load()
+    return render(request, "admin/checkpoints.html", user, db, crits=crits, items=items, zones=zones, s=s,
+                  rule_rev=int(s.get("_rule_rev", 0) or 0),
+                  open_rounds=db.query(Round).filter(Round.status == "open").order_by(Round.id.desc()).all())
+
+
+def _checkpoint_fields(k: Checkpoint, form, db) -> str:
+    text_ = (form.get("text") or "").strip()[:600]
+    crit = (form.get("crit_code") or "").strip().upper()
+    if not text_ or db.query(Criterion).filter(Criterion.code == crit).first() is None:
+        return "ใส่ข้อความของรายการตรวจ และเลือกหมวดที่มีอยู่"
+    try:
+        points, minor = float(form.get("points") or 5), float(form.get("minor_points") or 0)
+    except ValueError:
+        return "แต้มต้องเป็นตัวเลข"
+    if not 0 < points <= 100 or not 0 <= minor <= points:
+        return "แต้มเต็มต้องมากกว่า 0 และแต้มของบกพร่องเล็กน้อยต้องไม่เกินแต้มเต็ม"
+    k.text, k.crit_code, k.points, k.minor_points = text_, crit, points, minor
+    k.minor_hint = (form.get("minor_hint") or "").strip()[:400]
+    k.major_hint = (form.get("major_hint") or "").strip()[:400]
+    k.sort_order = _int(form.get("sort_order"), 100)
+    k.active = form.get("active", "1") == "1"
+    return ""
+
+
+@router.post("/checkpoints/save")
+def checkpoint_save(request: Request, form=Depends(form_data), user=Depends(need("criteria")), db=Depends(get_db)):
+    kid = _int(form.get("id"))
+    code = (form.get("code") or "").strip().upper()[:12]
+    k = db.get(Checkpoint, kid) if kid else None
+    if not code or not code.replace("-", "").replace("_", "").isalnum() or code.startswith("Z"):
+        flash(request, "รหัสข้อใช้ตัวอักษรอังกฤษและตัวเลข และไม่ขึ้นต้นด้วย Z (ตัว Z สงวนไว้ให้โซน)", "err")
+        return back("/admin/checkpoints")
+    if db.query(Checkpoint).filter(Checkpoint.code == code, Checkpoint.id != kid).first():
+        flash(request, f"รหัสข้อ {code} มีอยู่แล้ว", "err")
+        return back("/admin/checkpoints")
+    if k is None:
+        k = Checkpoint(code=code, text="", crit_code="")
+        db.add(k)
+    problem = _checkpoint_fields(k, form, db)
+    if problem:
+        db.rollback()
+        flash(request, problem, "err")
+        return back("/admin/checkpoints")
+    k.code = code
+    types = area_types(settings_store.load())
+    k.area_types = [t for t in form.getlist("area_types") if t in types]
+    k.allow_na = form.get("allow_na") == "1"
+    rev = bump_rule_rev(db)
+    log(db, user, "save_checkpoint", f"ฉบับที่ {rev}: {code} {k.text[:120]} ({k.points:g}/{k.minor_points:g}/0)")
+    db.commit()
+    flash(request, f"บันทึกข้อ {code} แล้ว มีผลกับรอบที่สร้างใหม่")
+    return back("/admin/checkpoints")
+
+
+@router.post("/checkpoints/reset")
+def checkpoints_reset(request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
+    db.query(Checkpoint).filter(Checkpoint.area_id.is_(None)).delete()
+    db.flush()
+    seed_checkpoints(db)
+    log(db, user, "reset_checkpoints", f"ฉบับที่ {bump_rule_rev(db)}")
+    db.commit()
+    flash(request, "คืนค่ารายการตรวจตั้งต้น 13 ข้อแล้ว (โซนของจุดตรวจไม่ถูกแตะ)")
+    return back("/admin/checkpoints")
+
+
+@router.post("/checkpoints/{kid}/delete")
+def checkpoint_delete(kid: int, request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
+    k = db.get(Checkpoint, kid)
+    target = "/admin/checkpoints"
+    if k is not None:
+        if k.area_id:
+            target = f"/admin/areas/{k.area_id}/zones"
+        log(db, user, "delete_zone" if k.area_id else "delete_checkpoint", f"ฉบับที่ {bump_rule_rev(db)}: {k.code} {k.text[:120]}")
+        db.delete(k)
+        db.commit()
+        flash(request, f"ลบข้อ {k.code} แล้ว รอบที่ตรวจไปแล้วยังใช้รายการชุดเดิม")
+    return back(target)
+
+
+@router.get("/areas/{aid}/zones", response_class=HTMLResponse)
+def zones_page(aid: int, request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
+    area = db.get(AuditArea, aid)
+    if area is None:
+        raise HTTPException(404, "ไม่พบจุดตรวจนี้")
+    q = db.query(Photo).filter(Photo.area_id == aid, Photo.has_image.is_(True))
+    ref = (q.filter(Photo.camera_id.isnot(None)).order_by(Photo.id.desc()).first() or q.order_by(Photo.id.desc()).first())
+    return render(request, "admin/zones.html", user, db, area=area, ref=ref,
+                  from_camera=bool(ref and rules.fixed_view(ref)),
+                  items=db.query(Checkpoint).filter(Checkpoint.area_id == aid).order_by(Checkpoint.id).all(),
+                  crits=db.query(Criterion).filter(Criterion.active.is_(True)).order_by(Criterion.sort_order).all(),
+                  cams=db.query(Camera).filter(Camera.department_id == area.department_id,
+                                               Camera.area_name == area.name).count())
+
+
+@router.post("/areas/{aid}/zones/save")
+def zone_save(aid: int, request: Request, form=Depends(form_data), user=Depends(need("criteria")), db=Depends(get_db)):
+    area = db.get(AuditArea, aid)
+    if area is None:
+        raise HTTPException(404, "ไม่พบจุดตรวจนี้")
+    box = [_int(form.get(n), -1, 0, 1000) for n in ("x1", "y1", "x2", "y2")]
+    if box[2] - box[0] < 30 or box[3] - box[1] < 30:
+        flash(request, "ลากกรอบบนภาพก่อนบันทึก กรอบต้องไม่เล็กเกินไป", "err")
+        return back(f"/admin/areas/{aid}/zones")
+    k = Checkpoint(code="ZTMP", text="", crit_code="", area_id=aid, zone=box, allow_na=False, area_types=[])
+    db.add(k)
+    problem = _checkpoint_fields(k, form, db)
+    if problem:
+        db.rollback()
+        flash(request, problem, "err")
+        return back(f"/admin/areas/{aid}/zones")
+    db.flush()
+    k.code = f"Z{k.id}"
+    rev = bump_rule_rev(db)
+    log(db, user, "save_zone", f"ฉบับที่ {rev}: {k.code} {area.name}: {k.text[:120]}")
+    db.commit()
+    flash(request, f"บันทึกโซน {k.code} แล้ว ใช้กับภาพจากกล้องติดตายของจุดนี้ในรอบที่สร้างใหม่")
+    return back(f"/admin/areas/{aid}/zones")
+
+
+@router.get("/quality", response_class=HTMLResponse)
+def quality_page(request: Request, round: int = 0, user=Depends(need("score")), db=Depends(get_db)):
+    return render(request, "admin/quality.html", user, db, q=scoring.ai_quality(db, round), round=round,
+                  rounds=db.query(Round).filter(Round.mode == "checklist").order_by(Round.id.desc()).all())
 
 
 # --------------------------------------------------------------------------- แผนก
@@ -463,6 +623,10 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
            "storage_warn_pct": _int(form.get("storage_warn_pct"), 80, 10, 99),
            "max_photos_per_dept": _int(form.get("max_photos_per_dept"), 0, 0, 100000),
            "backup_remind_days": _int(form.get("backup_remind_days"), 7, 0, 365),
+           "scoring_mode": "checklist" if form.get("scoring_mode") == "checklist" else "level",
+           "auto_actions": form.get("auto_actions") == "1",
+           "action_due_days": _int(form.get("action_due_days"), 7, 0, 365),
+           "action_due_days_major": _int(form.get("action_due_days_major"), 3, 0, 365),
            "ai_rpm": _int(form.get("ai_rpm"), 6, 1, 60),
            "ai_daily": _int(form.get("ai_daily"), 200, 1, 100000),
            "ai_max_attempts": _int(form.get("ai_max_attempts"), 4, 1, 10),
@@ -798,6 +962,36 @@ def photo_override(pid: int, request: Request, form=Depends(form_data), user=Dep
         return back(f"/photos/{pid}")
     rnd = db.get(Round, p.round_id)
     old = p.analysis or {}
+    if (rnd.mode or "level") == "checklist":
+        prev = {c["code"]: c for c in old.get("checks", [])}
+        checks = []
+        for k in rules.applicable(rnd.checklist or [], rnd.rubric or [], p):
+            v, b = form.get(f"check_{k['code']}") or "", prev.get(k["code"], {})
+            if v not in rules.STATUS or (v == "na" and not k.get("allow_na", True)):
+                flash(request, f"เลือกผลของข้อ {k['code']}", "err")
+                return back(f"/photos/{pid}")
+            ai_status = b.get("ai_status", b.get("status"))          # สิ่งที่ AI เสนอไว้เดิม เก็บไว้วัดความแม่น
+            checks.append(dict(code=k["code"], text=k["text"], crit=k["crit"], max=float(k["points"]), minor=float(k["minor"]),
+                               zone=list(k["zone"]) if k.get("zone") else None, status=v, points=0.0, evidence=b.get("evidence", ""),
+                               action=b.get("action", "") if v in rules.NG else "", box=b.get("box") if v in rules.NG else None,
+                               ai_status=ai_status, changed=ai_status != v))
+        original = old.get("ai_original") or (dict(criteria=old.get("criteria", []), score=p.score, max=p.max_score,
+                                                   percent=p.percent, model=p.model, status=p.status) if old else None)
+        result = rules.finalize(db, p, list(rnd.rubric or []), dict(
+            image_ok=True, image_issue="", scene=old.get("scene", ""), summary=old.get("summary", ""),
+            top_actions=old.get("top_actions", []), checks=checks, ai_original=original))
+        worker.apply_result(p, result, p.provider or "manual", p.model or "manual")
+        p.overridden, p.override_by, p.override_note, p.override_at = True, user.full_name or user.username, note, now()
+        p.review_flag = False
+        p.verified_by, p.verified_at = user.full_name or user.username, now()
+        changed = [c["code"] for c in checks if c["changed"]]
+        log(db, user, "override_score", f"ภาพ {p.id}: แก้ข้อ {', '.join(changed) or '-'} เหตุผล: {note}")
+        if settings_store.load().get("auto_actions", True):
+            act_mod.create_for_photo(db, p, user, settings_store.load())
+        notify.emit(db, "result", round_id=p.round_id, department_id=p.department_id, photo_id=p.id)
+        db.commit()
+        flash(request, "บันทึกผลที่ปรับแล้ว ระบบคิดคะแนนใหม่ตามกติกา")
+        return back(f"/photos/{pid}")
     prev = {c["code"]: c for c in old.get("criteria", [])}
     crit = []
     for c in (rnd.rubric or []):
@@ -851,7 +1045,10 @@ def photo_action(pid: int, action: str, request: Request, user=Depends(need("sco
             p.review_flag = False
             p.verified_by, p.verified_at = user.full_name or user.username, now()
             log(db, user, "verify_photo", f"ภาพ {p.id} {p.department.name} / {p.area_name}: ยืนยัน {p.score:g}/{p.max_score:g}")
+            made = act_mod.create_for_photo(db, p, user, settings_store.load()) if settings_store.load().get("auto_actions", True) else 0
             db.commit()
+            if made:
+                flash(request, f"สร้างงานแก้ไข {made} งานจากข้อที่ไม่ผ่าน")
             flash(request, f"ยืนยันผลของภาพ {p.id} แล้ว")
         target = request.headers.get("referer") or ""
         if "/verify" in target:

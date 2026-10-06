@@ -8,7 +8,8 @@
 </div>
 <div class="photo-view" {% if p.status in ('pending', 'processing') %}data-poll="{{ p.id }}"{% endif %}>
   <div class="stack">
-    <div class="shot"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}"></div>
+    <div class="shot">{{ m.shot(p, '/photos/' ~ p.id ~ '/image') }}</div>
+    {% if p.status == 'done' and (p.analysis or {}).mode == 'checklist' %}<p class="muted" style="margin-top:6px">กรอบสีแดงและเหลืองคือจุดที่ AI ชี้ว่าไม่ผ่าน ตามรหัสข้อ{% if zones %} กรอบสีน้ำเงินคือโซนที่โรงงานกำหนด{% endif %} ตำแหน่งกรอบเป็นค่าประมาณจาก AI</p>{% endif %}
     <section class="panel">
       <dl class="meta-list">
         <dt>ภาพเลขที่</dt><dd>{{ p.id }}</dd>
@@ -61,7 +62,20 @@
       <details class="edit" style="margin-top:8px">
         <summary><b>ปรับคะแนนด้วยกรรมการ</b></summary>
         <form method="post" action="/admin/photos/{{ p.id }}/override">
-          <p class="muted">ใช้เมื่อ AI ประเมินพลาดอย่างชัดเจน ระบบจะเก็บคะแนนเดิมของ AI และแสดงในรายงานว่าภาพนี้ถูกปรับ</p>
+          <p class="muted">ใช้เมื่อ AI ประเมินพลาดอย่างชัดเจน ระบบจะเก็บผลเดิมของ AI และแสดงในรายงานว่าภาพนี้ถูกปรับ</p>
+          {% if rnd.mode == 'checklist' %}
+          {% set curk = {} %}{% for x in a.checks or [] %}{% set _ = curk.update({x.code: x.status}) %}{% endfor %}
+          {% for k in checklist %}
+          <label class="field"><span><b>{{ k.code }}</b> {{ k.text }}</span>
+            <select name="check_{{ k.code }}" required>
+              <option value="">เลือกผล</option>
+              <option value="ok"{{ ' selected' if curk.get(k.code) == 'ok' }}>ผ่าน</option>
+              <option value="minor"{{ ' selected' if curk.get(k.code) == 'minor' }}>บกพร่องเล็กน้อย: {{ k.minor_hint }}</option>
+              <option value="major"{{ ' selected' if curk.get(k.code) == 'major' }}>บกพร่องมาก: {{ k.major_hint }}</option>
+              {% if k.allow_na %}<option value="na"{{ ' selected' if curk.get(k.code) == 'na' }}>มองไม่เห็นในภาพนี้</option>{% endif %}
+            </select></label>
+          {% endfor %}
+          {% else %}
           {% set cur = {} %}{% for c in a.criteria or [] %}{% set _ = cur.update({c.code: c}) %}{% endfor %}
           {% for c in rnd.rubric %}
           <label class="field"><span>{{ c.name }} <em>เต็ม {{ c.max|num }}</em></span>
@@ -71,6 +85,7 @@
               {% if c.allow_na %}<option value="na"{{ ' selected' if cur.get(c.code) and cur[c.code].na }}>ภาพนี้ไม่มีหลักฐานพอให้ประเมิน</option>{% endif %}
             </select></label>
           {% endfor %}
+          {% endif %}
           <label class="field"><span>เหตุผลที่ปรับ</span><textarea name="note" required minlength="5" maxlength="1000"></textarea></label>
           <button class="btn primary">บันทึกคะแนนที่ปรับ</button>
         </form>
@@ -78,6 +93,30 @@
       {% endif %}
       {% if a.ai_original and a.ai_original.criteria %}
       <p class="muted" style="margin-top:8px">คะแนนเดิมจาก AI: {{ a.ai_original.score|num }} / {{ a.ai_original.max|num }} ({{ a.ai_original.percent|num }}%)</p>
+      {% endif %}
+    </section>
+    {% endif %}
+    {% if p.status == 'done' and (actions or can_act) %}
+    <section class="panel">
+      <h2>งานแก้ไขของภาพนี้</h2>
+      {% for x in actions %}
+      <div class="crit"><div class="crit-head"><h3>{{ x.title }}</h3>
+        <span class="chip {{ 'chip-done' if x.status == 'done' else 'chip-error' if x.due_date and x.due_date < today else 'chip-pending' }}">{{ 'ปิดแล้ว' if x.status == 'done' else 'เกินกำหนด' if x.due_date and x.due_date < today else 'เปิดอยู่' }}</span></div>
+        <p class="muted">ผู้รับผิดชอบ {{ x.pic or 'ยังไม่ระบุ' }}, กำหนดเสร็จ {{ x.due_date|d }}{% if x.status == 'done' %}, ปิดโดย {{ x.closed_by }}: {{ x.close_note }}{% endif %}</p></div>
+      {% else %}<p class="muted">ยังไม่มีงานแก้ไข{% if (p.analysis or {}).mode == 'checklist' and not p.verified_at %} ระบบจะสร้างให้จากข้อที่ไม่ผ่านเมื่อมีการยืนยันผล{% endif %}</p>
+      {% endfor %}
+      {% if actions %}<p class="no-print"><a href="/actions?dept={{ p.department_id }}">จัดการงานแก้ไขของแผนกนี้</a></p>{% endif %}
+      {% if can_act %}
+      <details class="edit add no-print"><summary>เพิ่มงานแก้ไข</summary>
+        <form method="post" action="/actions/save">
+          <input type="hidden" name="photo_id" value="{{ p.id }}">
+          <label class="field"><span>สิ่งที่ต้องแก้ไข</span><input type="text" name="title" required maxlength="400"></label>
+          <div class="grid-2">
+            <label class="field"><span>ผู้รับผิดชอบ</span><input type="text" name="pic" maxlength="120"></label>
+            <label class="field"><span>กำหนดเสร็จ</span><input type="date" name="due_date" required></label>
+          </div>
+          <button class="btn primary">เพิ่มงานแก้ไข</button>
+        </form></details>
       {% endif %}
     </section>
     {% endif %}

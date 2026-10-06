@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}รายการตรวจ{% endblock %}
+{% macro form(k, crit) %}
+<form method="post" action="/admin/checkpoints/save">
+  {% if k %}<input type="hidden" name="id" value="{{ k.id }}">{% endif %}
+  <div class="grid-2">
+    <label class="field"><span>รหัสข้อ <em>สั้น ๆ ไม่ซ้ำกัน เช่น C14</em></span><input type="text" name="code" value="{{ k.code if k }}" required maxlength="12"></label>
+    <label class="field"><span>อยู่ในหมวด</span><select name="crit_code">{% for c in crits %}{% if c.kind != 'sustain' %}<option value="{{ c.code }}"{{ ' selected' if (k and k.crit_code == c.code) or (not k and crit and crit.code == c.code) }}>{{ c.name }}</option>{% endif %}{% endfor %}</select></label>
+  </div>
+  <label class="field"><span>สภาพที่ถูกต้อง <em>เขียนเป็นสิ่งที่มองเห็นได้และตัดสินได้จากภาพ</em></span><textarea name="text" required maxlength="600" placeholder="เช่น ทางเดินโล่ง ไม่มีสิ่งของวางอยู่ในทางเดิน">{{ k.text if k }}</textarea></label>
+  <label class="field"><span>นับเป็นบกพร่องเล็กน้อยเมื่อ</span><input type="text" name="minor_hint" value="{{ k.minor_hint if k }}" maxlength="400"></label>
+  <label class="field"><span>นับเป็นบกพร่องมากเมื่อ</span><input type="text" name="major_hint" value="{{ k.major_hint if k }}" maxlength="400"></label>
+  <div class="grid-2">
+    <label class="field"><span>แต้มเมื่อผ่าน</span><input type="number" name="points" value="{{ k.points|num if k else 5 }}" min="0.5" max="100" step="any" required></label>
+    <label class="field"><span>แต้มเมื่อบกพร่องเล็กน้อย <em>บกพร่องมากได้ 0</em></span><input type="number" name="minor_points" value="{{ k.minor_points|num if k else 3 }}" min="0" max="100" step="any" required></label>
+    <label class="field"><span>ลำดับการแสดง</span><input type="number" name="sort_order" value="{{ k.sort_order if k else 100 }}"></label>
+    {% if k %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if k.active }}>เปิดใช้</option><option value="0"{{ ' selected' if not k.active }}>ปิดใช้</option></select></label>{% endif %}
+  </div>
+  <fieldset class="perm-box"><legend>ใช้กับประเภทพื้นที่</legend>
+    <p class="muted" style="margin:4px 0">ไม่เลือกเลย = ใช้กับทุกประเภท</p>
+    <span class="perm-depts">{% for t in area_types %}<label><input type="checkbox" name="area_types" value="{{ t }}"{{ ' checked' if k and t in (k.area_types or []) }}> {{ t }}</label>{% endfor %}</span>
+  </fieldset>
+  <label class="check"><input type="checkbox" name="allow_na" value="1"{{ ' checked' if not k or k.allow_na }}><span>ให้ AI ตอบว่า มองไม่เห็นในภาพนี้ ได้ <em class="muted">(ข้อที่มองไม่เห็นจะไม่ถูกนับทั้งแต้มที่ได้และแต้มเต็ม)</em></span></label>
+  <button class="btn primary">{{ 'บันทึกข้อนี้' if k else 'เพิ่มรายการตรวจ' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>รายการตรวจ</h1><p>AI รายงานสภาพของแต่ละข้อ ระบบคิดคะแนนตามแต้มที่ตั้งไว้ที่นี่, เกณฑ์ฉบับที่ {{ rule_rev }}</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <p class="note blue">ใช้กับรอบที่สร้างในโหมด รายการตรวจ คะแนนของหมวด = คะแนนเต็มของหมวด x แต้มที่ได้ / แต้มเต็มของข้อที่ประเมินได้
+    ข้อที่ผูกกับโซนบนภาพของกล้องติดตาย ตั้งที่หน้า <a href="/admin/areas">จุดตรวจ</a> (ตอนนี้มี {{ zones }} โซน)
+    {% if s.scoring_mode != 'checklist' and user.role == 'admin' %}รอบใหม่ยังตั้งต้นเป็นโหมดระดับ 0 ถึง 4 <a href="/admin/settings">เปลี่ยนค่าตั้งต้น</a>{% endif %}</p>
+  {% for c in crits %}
+  <section class="panel">
+    <div class="area-head" style="margin-top:0"><h2>{{ c.name }}</h2><span class="muted">เต็ม {{ c.max_score|num }}{{ ', ปิดใช้' if not c.active }}</span></div>
+    {% if c.kind == 'sustain' %}
+      <p class="muted">หมวดนี้ระบบคำนวณเอง ไม่ใช้รายการตรวจ: ดูว่าข้อบกพร่องที่พบรอบก่อนของจุดเดียวกันถูกแก้แล้วกี่ข้อ และหักเพิ่ม 10% ต่องานแก้ไขที่เกินกำหนด</p>
+    {% else %}
+      {% for k in items.get(c.code, []) %}
+      <details class="edit">
+        <summary><span><b>{{ k.code }}</b> {{ k.text }}{% if not k.active %} <span class="chip chip-plain">ปิดใช้</span>{% endif %}{% if k.area_types %} <span class="chip chip-plain">{{ k.area_types|join(', ') }}</span>{% endif %}</span>
+          <span class="num">{{ k.points|num }} / {{ k.minor_points|num }} / 0</span></summary>
+        {{ form(k, c) }}
+        <form method="post" action="/admin/checkpoints/{{ k.id }}/delete" data-confirm="ลบข้อ {{ k.code }} รอบที่ตรวจไปแล้วยังใช้รายการชุดเดิม" style="padding:0 4px 14px"><button class="btn small danger">ลบข้อนี้</button></form>
+      </details>
+      {% else %}<p class="muted">ยังไม่มีรายการตรวจในหมวดนี้ หมวดที่ไม่มีข้อจะไม่ถูกคิดคะแนนในโหมดรายการตรวจ</p>
+      {% endfor %}
+      <details class="edit add"><summary>เพิ่มรายการตรวจในหมวดนี้</summary>{{ form(none, c) }}</details>
+    {% endif %}
+  </section>
+  {% endfor %}
+  <form method="post" action="/admin/checkpoints/reset" data-confirm="ลบรายการตรวจทั่วไปทั้งหมดแล้วแทนด้วยชุดตั้งต้น 13 ข้อ (โซนของจุดตรวจไม่ถูกลบ)"><button class="btn small quiet">คืนค่ารายการตรวจตั้งต้น</button></form>
+</div>
+{% endblock %}

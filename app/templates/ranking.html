@@ -6,6 +6,7 @@
   <div><h1>อันดับ 5ส</h1>{% if rnd %}<p>{{ rnd.name }}{% if rnd.start_date %}, {{ rnd.start_date|d }} ถึง {{ rnd.end_date|d }}{% endif %}{{ ', ปิดรอบแล้ว' if rnd.status == 'closed' else ', ยังเปิดรับภาพ อันดับอาจเปลี่ยน' }}</p>{% endif %}</div>
   {% if rnd and allowed %}
   <div class="actions no-print">
+    <a class="btn small quiet" href="/dashboard?round={{ rnd.id }}">ภาพรวม</a>
     <a class="btn small quiet" href="/trend">แนวโน้มข้ามรอบ</a>
     <a class="btn small" href="/rounds/{{ rnd.id }}/report" target="_blank" rel="noopener">รายงานสำหรับพิมพ์</a>
     {% if can(user, 'export') %}
@@ -15,6 +16,9 @@
         <a href="/rounds/{{ rnd.id }}/export/scores.xlsx">Excel พร้อมภาพย่อ (.xlsx)</a>
         <a href="/rounds/{{ rnd.id }}/export/ranking.csv">ตารางอันดับ (.csv)</a>
         <a href="/rounds/{{ rnd.id }}/export/photos.csv">คะแนนและเหตุผลรายภาพ (.csv)</a>
+        {% if rnd.mode == 'checklist' %}<a href="/rounds/{{ rnd.id }}/export/checks.csv">ผลรายข้อของทุกภาพ (.csv)</a>
+        <a href="/rounds/{{ rnd.id }}/dataset.zip">ชุดข้อมูลภาพที่ยืนยันแล้ว สำหรับฝึกโมเดล (.zip)</a>{% endif %}
+        <a href="/actions.csv">งานแก้ไขทั้งหมด (.csv)</a>
         <a href="/rounds/{{ rnd.id }}/export/data.json">ข้อมูลทั้งรอบสำหรับระบบอื่น (.json)</a>
         <a href="/rounds/{{ rnd.id }}/report" target="_blank" rel="noopener">รายงานพร้อมรูป บันทึกเป็น PDF จากหน้าพิมพ์</a>
         {% if can(user, 'storage') %}<a href="/admin/rounds/{{ rnd.id }}/backup.zip">ไฟล์สำรองพร้อมรูปทั้งหมด (.zip)</a>{% endif %}
@@ -72,7 +76,8 @@
   <section class="panel panel-line">
     <h3>คะแนนคิดอย่างไร</h3>
     <ul class="tips">
-      <li>AI ให้ระดับ 0 ถึง 4 ในแต่ละเกณฑ์ตามคำอธิบายระดับที่ผู้ดูแลตั้งไว้ แล้วระบบแปลงเป็นคะแนนตามคะแนนเต็มของเกณฑ์นั้น</li>
+      {% if rnd.mode == 'checklist' %}<li>AI ตรวจภาพทีละข้อตามรายการตรวจของโรงงาน แล้วรายงานว่า ผ่าน บกพร่องเล็กน้อย หรือบกพร่องมาก ระบบเป็นผู้คิดคะแนนจากแต้มของแต่ละข้อ AI ไม่ได้ให้คะแนนเอง (เกณฑ์ฉบับที่ {{ rnd.rule_rev or 0 }})</li>
+      {% else %}<li>AI ให้ระดับ 0 ถึง 4 ในแต่ละเกณฑ์ตามคำอธิบายระดับที่ผู้ดูแลตั้งไว้ แล้วระบบแปลงเป็นคะแนนตามคะแนนเต็มของเกณฑ์นั้น</li>{% endif %}
       <li>คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว ส่งภาพมากจึงไม่ได้เปรียบ แต่ภาพที่คะแนนต่ำจะดึงค่าเฉลี่ยลง</li>
       <li>ถ้าคะแนนเฉลี่ยเท่ากัน แผนกที่ภาพคะแนนต่ำสุดสูงกว่าจะอยู่อันดับดีกว่า</li>
       <li>ทุกภาพในรอบเดียวกันใช้เกณฑ์ชุดเดียวกัน และ AI ไม่ทราบว่าภาพเป็นของแผนกใด</li>

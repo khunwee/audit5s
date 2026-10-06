@@ -74,6 +74,54 @@ class Criterion(Base):
     allow_na = Column(Boolean, default=False, nullable=False)
     sort_order = Column(Integer, default=0, nullable=False)
     active = Column(Boolean, default=True, nullable=False)
+    kind = Column(String(12), default="ai")      # ai = ประเมินจากภาพ | sustain = ระบบคำนวณจากการพบซ้ำและงานแก้ไขค้าง
+
+
+class Checkpoint(Base):
+    """รายการตรวจ: สภาพที่มองเห็นได้ 1 ข้อ ซึ่ง AI ตัดสินว่า ผ่าน / บกพร่องเล็กน้อย / บกพร่องมาก แล้วระบบคิดคะแนนเอง
+
+    area_id ว่าง = ใช้กับทุกจุดตรวจ (กรองตามประเภทพื้นที่ได้), มี area_id = เฉพาะจุดนั้น
+    zone = กรอบ [x1, y1, x2, y2] (0-1000) บนภาพจากกล้องติดตายของจุดนั้น
+    """
+    __tablename__ = "checkpoints"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(12), unique=True, nullable=False)
+    crit_code = Column(String(12), nullable=False)
+    text = Column(Text, nullable=False)
+    minor_hint = Column(Text, default="")
+    major_hint = Column(Text, default="")
+    points = Column(Float, default=5, nullable=False)
+    minor_points = Column(Float, default=3, nullable=False)
+    area_types = Column(JSON, default=list)
+    area_id = Column(Integer, nullable=True, index=True)
+    zone = Column(JSON, nullable=True)
+    allow_na = Column(Boolean, default=True, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+
+class Action(Base):
+    """งานแก้ไขจากข้อบกพร่องที่ยืนยันแล้ว: ผู้รับผิดชอบ กำหนดเสร็จ และสถานะ"""
+    __tablename__ = "actions"
+    id = Column(Integer, primary_key=True)
+    round_id = Column(Integer, nullable=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False, index=True)
+    area_name = Column(String(160), default="")
+    photo_id = Column(Integer, nullable=True, index=True)
+    check_code = Column(String(12), default="")
+    title = Column(String(400), nullable=False)
+    detail = Column(Text, default="")
+    severity = Column(String(10), default="minor")
+    pic = Column(String(120), default="")
+    due_date = Column(Date, nullable=True)
+    status = Column(String(10), default="open", nullable=False)     # open | done
+    created_by = Column(String(120), default="")
+    created_at = Column(DateTime, default=now)
+    closed_at = Column(DateTime, nullable=True)
+    closed_by = Column(String(120), default="")
+    close_note = Column(Text, default="")
+    after_photo_id = Column(Integer, nullable=True)
+    department = relationship("Department", lazy="joined")
 
 
 class Round(Base):
@@ -89,6 +137,9 @@ class Round(Base):
     created_at = Column(DateTime, default=now)
     closed_at = Column(DateTime, nullable=True)
     last_backup_at = Column(DateTime, nullable=True)
+    mode = Column(String(12), default="level")   # level = AI เลือกระดับ 0-4 ต่อเกณฑ์ | checklist = ตรวจทีละข้อ ระบบคิดคะแนน
+    checklist = Column(JSON, nullable=True)      # สำเนารายการตรวจของรอบ
+    rule_rev = Column(Integer, default=0)        # เลขฉบับของเกณฑ์ที่รอบนี้ใช้
 
 
 class Photo(Base):
@@ -287,7 +338,7 @@ DEFAULT_CRITERIA = [
                  "มีมาตรฐานบางอย่าง แต่ไม่ครบหรือไม่เป็นแบบเดียวกัน เส้นหรือป้ายบางส่วนชำรุด",
                  "มีมาตรฐานที่มองเห็นได้เกือบครบ พบจุดที่ชำรุดหรือไม่เป็นไปตามมาตรฐาน 1-2 จุด",
                  "มาตรฐานชัดเจนและเป็นแบบเดียวกันทั้งพื้นที่ เส้นและป้ายอยู่ในสภาพดี ไม่มีสิ่งกีดขวางอุปกรณ์ความปลอดภัย"]),
-    dict(code="S5", name="สร้างนิสัย (Shitsuke)", max_score=20, allow_na=True,
+    dict(code="S5", name="สร้างนิสัย (Shitsuke)", max_score=20, allow_na=True, kind="sustain",
          focus="หลักฐานการรักษามาตรฐานอย่างต่อเนื่อง เช่น บอร์ด 5ส ตารางเวรทำความสะอาด ใบตรวจเช็กที่เป็นปัจจุบัน การแต่งกายและอุปกรณ์ป้องกันของพนักงาน และไม่มีร่องรอยการปล่อยปละละเลยสะสม",
          levels=["เห็นร่องรอยการปล่อยปละละเลยสะสมเป็นเวลานานทั่วพื้นที่",
                  "ไม่มีหลักฐานการดูแลต่อเนื่อง หรือพบการไม่ปฏิบัติตามกฎที่เห็นได้ชัด (เช่น ไม่สวมอุปกรณ์ป้องกัน)",
@@ -305,8 +356,35 @@ def rubric_snapshot(db) -> list:
         levels = list(c.levels or [])
         levels = (levels + [""] * 5)[:5]
         out.append(dict(code=c.code, name=c.name, focus=c.focus or "", max=float(c.max_score),
-                        levels=levels, allow_na=bool(c.allow_na)))
+                        levels=levels, allow_na=bool(c.allow_na), kind=c.kind or "ai"))
     return out
+
+
+_MINOR = "พบ 1-2 จุด และไม่กีดขวางการทำงานหรือความปลอดภัย"
+_MAJOR = "พบหลายจุด หรือกีดขวางการทำงาน ทางเดิน หรืออุปกรณ์ความปลอดภัย"
+DEFAULT_CHECKPOINTS = [
+    ("C01", "S1", "ไม่มีของที่ไม่จำเป็น ของเสีย หรือของชำรุดวางอยู่ในพื้นที่", _MINOR, _MAJOR),
+    ("C02", "S1", "ไม่มีพาเลทเปล่าหรือพาเลทที่ไม่ใช้งานวางค้างอยู่", "พบ 1 ใบ วางชิดขอบ ไม่กีดขวาง", "พบหลายใบ หรือวางกีดขวางทางเดินหรือพื้นที่ทำงาน"),
+    ("C03", "S1", "ปริมาณงานระหว่างผลิตและวัสดุไม่ล้นเกินพื้นที่หรือชั้นที่กำหนด", "ล้นออกนอกพื้นที่เล็กน้อย 1 จุด", "กองล้นหลายจุด หรือวางซ้อนสูงจนเสี่ยงล้ม"),
+    ("C04", "S2", "ทางเดินโล่ง ไม่มีสิ่งของวางอยู่ในทางเดิน", "มีของล้ำเข้ามาในทางเดินเล็กน้อย 1 จุด ยังเดินผ่านได้สะดวก", "มีของวางขวางทางเดิน หรือทางเดินแคบลงจนผ่านลำบาก"),
+    ("C05", "S2", "วัสดุและชิ้นงานอยู่ภายในเส้นหรือพื้นที่ที่กำหนด", "วางคร่อมเส้นหรือออกนอกพื้นที่ 1-2 จุด", "วางนอกพื้นที่ที่กำหนดหลายจุด หรือไม่มีการวางตามพื้นที่เลย"),
+    ("C06", "S2", "เครื่องมือและอุปกรณ์อยู่ในตำแหน่งที่กำหนด", "มีเครื่องมือวางผิดที่ 1-2 ชิ้น", "เครื่องมือหลายชิ้นวางกระจาย หรือวางบนพื้น"),
+    ("C07", "S2", "ถัง กล่อง และภาชนะวางตรงตำแหน่งและเป็นแนวเดียวกัน", "วางเบี้ยวหรือผิดตำแหน่ง 1-2 ใบ", "วางปะปน ซ้อนไม่เป็นระเบียบ หรือผิดตำแหน่งหลายใบ"),
+    ("C08", "S3", "ไม่มีเศษวัสดุหรือขยะบนพื้น", "พบเศษเล็กน้อย 1-2 จุด", "พบเศษวัสดุหรือขยะหลายจุด หรือกองสะสม"),
+    ("C09", "S3", "ไม่มีคราบน้ำมันหรือน้ำบนพื้น", "พบคราบแห้งหรือคราบขนาดเล็ก 1 จุด", "พบคราบเปียก คราบขนาดใหญ่ หรือหลายจุด ซึ่งเสี่ยงลื่น"),
+    ("C10", "S3", "พื้น เครื่องจักร โต๊ะ และชั้นวางสะอาด ไม่มีฝุ่นหรือคราบสะสม", "พบฝุ่นหรือคราบเล็กน้อย 1-2 จุด", "พบฝุ่นหนาหรือคราบสกปรกเห็นชัดหลายบริเวณ"),
+    ("C11", "S4", "วัสดุ ชิ้นงาน และชั้นวางมีป้ายชี้บ่งที่อ่านได้ชัดเจน", "ป้ายขาดหายหรืออ่านยาก 1-2 จุด", "ไม่มีป้ายชี้บ่งเป็นส่วนใหญ่ หรือป้ายเสียหายหลายจุด"),
+    ("C12", "S4", "เส้นแบ่งพื้นที่และป้ายมาตรฐานอยู่ในสภาพดี ไม่ลบเลือน", "เส้นหรือป้ายซีดจางบางช่วง", "เส้นหรือป้ายลบเลือนจนแยกพื้นที่ไม่ได้ หรือไม่มีเส้นแบ่ง"),
+    ("C13", "S4", "ถังดับเพลิง ทางหนีไฟ และตู้ไฟฟ้าไม่ถูกสิ่งของกีดขวาง", "มีของวางใกล้แต่ยังเข้าถึงได้", "มีของวางขวางจนเข้าถึงไม่ได้ทันที"),
+]
+
+
+def checklist_snapshot(db) -> list:
+    rows = (db.query(Checkpoint).filter(Checkpoint.active.is_(True))
+            .order_by(Checkpoint.sort_order, Checkpoint.id).all())
+    return [dict(code=k.code, crit=k.crit_code, text=k.text, minor_hint=k.minor_hint or "", major_hint=k.major_hint or "",
+                 points=float(k.points), minor=float(min(k.minor_points, k.points)), types=list(k.area_types or []),
+                 area_id=k.area_id, zone=list(k.zone) if k.zone else None, allow_na=bool(k.allow_na)) for k in rows]
 
 
 def _migrate_columns():
@@ -335,7 +413,15 @@ def init_db():
         if db.query(Criterion).count() == 0:
             for i, c in enumerate(DEFAULT_CRITERIA):
                 db.add(Criterion(sort_order=(i + 1) * 10, **c))
+        if db.query(Checkpoint).count() == 0:
+            seed_checkpoints(db)
         db.commit()
+
+
+def seed_checkpoints(db):
+    for i, (code, crit, text_, minor, major) in enumerate(DEFAULT_CHECKPOINTS):
+        db.add(Checkpoint(code=code, crit_code=crit, text=text_, minor_hint=minor, major_hint=major,
+                          points=5, minor_points=3, area_types=[], allow_na=True, sort_order=(i + 1) * 10))
 
 
 def get_db():

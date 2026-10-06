@@ -40,7 +40,15 @@ body { background: #fff; padding-bottom: 0; }</style>
       <tr><th>เกณฑ์</th><th class="r">คะแนนเต็ม</th><th>สิ่งที่ต้องดู</th></tr>
       {% for c in ranking.rubric %}<tr><td>{{ c.name }}</td><td class="r">{{ c.max|num }}</td><td>{{ c.focus }}</td></tr>{% endfor %}
     </table></div>
-    <p class="muted" style="margin-top:8px">AI ให้ระดับ 0 ถึง 4 ต่อเกณฑ์ ระบบแปลงเป็นคะแนนตามคะแนนเต็ม คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว</p>
+    {% if rnd.mode == 'checklist' %}
+    <p class="muted" style="margin-top:8px">เกณฑ์ฉบับที่ {{ rnd.rule_rev or 0 }} AI รายงานสภาพของแต่ละข้อ (ผ่าน บกพร่องเล็กน้อย บกพร่องมาก) ระบบคิดคะแนนของหมวดจากแต้มที่ได้เทียบกับแต้มเต็มของข้อที่ประเมินได้ คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพ</p>
+    <div class="table-wrap" style="margin-top:8px"><table>
+      <tr><th>รหัส</th><th>รายการตรวจ</th><th>หมวด</th><th class="r">ผ่าน</th><th class="r">เล็กน้อย</th><th class="r">มาก</th></tr>
+      {% for k in rnd.checklist or [] %}<tr><td>{{ k.code }}</td><td>{{ k.text }}</td><td>{{ k.crit }}</td><td class="r">{{ k.points|num }}</td><td class="r">{{ k.minor|num }}</td><td class="r">0</td></tr>{% endfor %}
+    </table></div>
+    {% else %}
+    <p class="muted" style="margin-top:8px">เกณฑ์ฉบับที่ {{ rnd.rule_rev or 0 }} AI ให้ระดับ 0 ถึง 4 ต่อเกณฑ์ ระบบแปลงเป็นคะแนนตามคะแนนเต็ม คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว</p>
+    {% endif %}
   </section>
 
   {% for r in ranking.ranked + ranking.unranked %}
@@ -55,7 +63,7 @@ body { background: #fff; padding-bottom: 0; }</style>
     {% endif %}
     {% for p in by.get(r.dept.id, []) %}
     <div class="photo-row">
-      {% if img(p) %}<img src="{{ img(p) }}" alt="ภาพจุดตรวจ {{ p.area_name }}">{% else %}<div class="muted">ไม่มีไฟล์ภาพ</div>{% endif %}
+      {% if img(p) %}{{ m.shot(p, img(p)) }}{% else %}<div class="muted">ไม่มีไฟล์ภาพ</div>{% endif %}
       <div>
         <div class="split"><h3>{{ p.area_name }}</h3>{% if p.status == 'done' %}<span class="num">{{ p.score|num }} / {{ p.max_score|num }} ({{ p.percent|num }}%)</span>{% endif %}</div>
         <p class="muted" style="margin:0">ภาพเลขที่ {{ p.id }}, {{ area_label(p.area_type) }}, ส่งเมื่อ {{ p.created_at|dt }} โดย {{ p.uploader_name or '-' }} {{ m.chip(p) }}</p>

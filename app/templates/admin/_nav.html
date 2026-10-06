@@ -1,7 +1,9 @@
 <nav class="subnav no-print" aria-label="เมนูจัดการระบบ">
   <a href="/admin" class="{{ 'on' if path == '/admin' }}">ภาพรวม</a>
   {% if can(user, 'rounds') %}<a href="/admin/rounds" class="{{ 'on' if path.startswith('/admin/rounds') }}">รอบการตรวจ</a>{% endif %}
-  {% if can(user, 'criteria') %}<a href="/admin/criteria" class="{{ 'on' if path.startswith('/admin/criteria') }}">เกณฑ์การให้คะแนน</a>{% endif %}
+  {% if can(user, 'criteria') %}<a href="/admin/criteria" class="{{ 'on' if path.startswith('/admin/criteria') }}">หมวดและคะแนนเต็ม</a>
+  <a href="/admin/checkpoints" class="{{ 'on' if path.startswith('/admin/checkpoints') }}">รายการตรวจ</a>{% endif %}
+  {% if can(user, 'score') %}<a href="/admin/quality" class="{{ 'on' if path.startswith('/admin/quality') }}">ความแม่นของ AI</a>{% endif %}
   {% if can(user, 'departments') %}<a href="/admin/departments" class="{{ 'on' if path.startswith('/admin/departments') }}">แผนก</a>
   <a href="/admin/areas" class="{{ 'on' if path.startswith('/admin/areas') }}">จุดตรวจ</a>{% endif %}
   {% if user.role == 'admin' %}

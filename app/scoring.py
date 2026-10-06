@@ -109,3 +109,78 @@ def find_row(ranking: dict, dept_id: int):
             if r["dept"].id == dept_id:
                 return r
     return None
+
+
+def dashboard(db, rnd: Round) -> dict:
+    """ภาพรวมของรอบ: สถานะสี คะแนนรายหมวดทั้งโรงงาน ข้อที่ไม่ผ่านบ่อย (Pareto) ข้อที่พบซ้ำจากรอบก่อน และงานแก้ไขค้าง"""
+    from . import actions as act_mod, settings_store
+    from .db import Action
+    from .web import band
+    rk = round_ranking(db, rnd)
+    rows = rk["ranked"] + rk["unranked"]
+    bands = {"good": 0, "mid": 0, "low": 0}
+    for r in rk["ranked"]:
+        bands[band(r["avg"])] += 1
+    photos = db.query(Photo).filter(Photo.round_id == rnd.id, Photo.status == "done").all()
+    old = superseded(photos) if settings_store.load().get("after_replaces", True) else set()
+    photos = [p for p in photos if p.id not in old and p.percent is not None]
+    cats = {}
+    for c in rk["rubric"]:
+        vals = [i["score"] / i["max"] * 100 for p in photos for i in (p.analysis or {}).get("criteria", [])
+                if i.get("code") == c["code"] and not i.get("na") and i.get("max")]
+        cats[c["code"]] = _mean(vals)
+    pareto, repeats = {}, []
+    for p in photos:
+        for x in (p.analysis or {}).get("checks", []):
+            if x.get("status") in ("minor", "major"):
+                e = pareto.setdefault(x["code"], dict(code=x["code"], text=x["text"], minor=0, major=0, areas=set()))
+                e[x["status"]] += 1
+                e["areas"].add(p.area_name)
+                if x.get("repeat"):
+                    repeats.append(dict(dept=p.department.name, area=p.area_name, text=x["text"], photo=p))
+    top = sorted(pareto.values(), key=lambda e: (-(e["minor"] + e["major"]), -e["major"], e["code"]))[:10]
+    for e in top:
+        e["count"], e["areas"] = e["minor"] + e["major"], len(e["areas"])
+    open_acts = db.query(Action).filter(Action.status == "open").all()
+    by_dept = defaultdict(lambda: dict(open=0, overdue=0))
+    for a in open_acts:
+        by_dept[a.department_id]["open"] += 1
+        if act_mod.is_overdue(a):
+            by_dept[a.department_id]["overdue"] += 1
+    return dict(ranking=rk, rows=rows, bands=bands, cats=cats, pareto=top, repeats=repeats[:20],
+                n_photos=len(photos), checklist=(rnd.mode or "level") == "checklist",
+                actions=dict(open=len(open_acts), overdue=sum(1 for a in open_acts if act_mod.is_overdue(a))),
+                act_by_dept=dict(by_dept), max_count=max([e["count"] for e in top] or [1]))
+
+
+def ai_quality(db, round_id: int = 0) -> dict:
+    """เทียบสิ่งที่ AI เสนอกับสิ่งที่คนยืนยัน ในภาพที่ยืนยันแล้วของโหมดรายการตรวจ
+
+    false_alarm = AI ว่าไม่ผ่าน คนว่าผ่าน / miss = AI ว่าผ่าน คนว่าไม่ผ่าน / severity = ไม่ผ่านทั้งคู่แต่ระดับต่างกัน
+    """
+    q = db.query(Photo).filter(Photo.status == "done", Photo.verified_at.isnot(None))
+    if round_id:
+        q = q.filter(Photo.round_id == round_id)
+    per, total = {}, dict(n=0, agree=0, false_alarm=0, miss=0, severity=0, visibility=0)
+    n_photos = 0
+    for p in q.all():
+        a = p.analysis or {}
+        if a.get("mode") != "checklist":
+            continue
+        n_photos += 1
+        for x in a.get("checks", []):
+            ai_status, final = x.get("ai_status", x.get("status")), x.get("status")
+            if ai_status is None:
+                continue
+            e = per.setdefault(x["code"], dict(code=x["code"], text=x["text"], n=0, agree=0, false_alarm=0, miss=0,
+                                               severity=0, visibility=0))
+            ng_ai, ng_h = ai_status in ("minor", "major"), final in ("minor", "major")
+            kind = ("agree" if ai_status == final else "visibility" if "na" in (ai_status, final)
+                    else "false_alarm" if ng_ai and not ng_h else "miss" if ng_h and not ng_ai else "severity")
+            for target in (e, total):
+                target["n"] += 1
+                target[kind] += 1
+    rows = sorted(per.values(), key=lambda e: (e["agree"] / e["n"] if e["n"] else 1, e["code"]))
+    for e in rows + [total]:
+        e["pct"] = round(e["agree"] / e["n"] * 100, 1) if e["n"] else None
+    return dict(rows=rows, total=total, photos=n_photos)

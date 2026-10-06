@@ -19,16 +19,26 @@
   {% for p in items %}
   {% set a = p.analysis or {} %}
   <article class="verify-card">
-    <a href="/photos/{{ p.id }}/image" target="_blank" rel="noopener"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}" loading="lazy"></a>
+    <a href="/photos/{{ p.id }}/image" target="_blank" rel="noopener">{{ m.shot(p, '/photos/' ~ p.id ~ '/image') }}</a>
     <div>
       <div class="split"><div><h2>{{ p.area_name }}</h2><p class="muted" style="margin:0">{{ p.department.name }}, ภาพเลขที่ {{ p.id }}, ส่งโดย {{ p.uploader_name or '-' }} เมื่อ {{ p.created_at|dt }}</p></div>{{ m.tag(p.percent) }}</div>
       {% if p.review_flag %}<p class="note" style="margin-top:8px">AI ประเมินสองรอบได้ผลต่างกันมาก ดูภาพนี้ให้ละเอียด</p>{% endif %}
       {% if a.summary %}<p style="margin-top:8px">{{ a.summary }}</p>{% endif %}
+      {% if a.mode == 'checklist' %}
+      {% set ng = (a.checks or [])|selectattr('status', 'in', ['minor', 'major'])|list %}
+      <p class="muted" style="margin-top:8px">ตรวจ {{ (a.checks or [])|rejectattr('status', 'equalto', 'na')|list|length }} ข้อ ไม่ผ่าน {{ ng|length }} ข้อ{% if not ng %} AI ไม่พบข้อบกพร่อง ดูภาพว่าไม่มีสิ่งที่ AI มองข้าม{% endif %}</p>
+      <ul class="checks">
+        {% for x in ng %}
+        <li class="ck ck-{{ x.status }}"><span class="ck-st">{{ CHECK_STATUS[x.status] }}</span><span class="ck-body"><b>{{ x.code }}</b> {{ x.text }}{% if x.repeat %} <span class="chip chip-error">พบซ้ำ</span>{% endif %}{% if x.evidence %}<br>{{ x.evidence }}{% endif %}</span><span class="num">{{ x.points|num }}/{{ x.max|num }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}
       <ul class="verify-rows">
         {% for c in a.criteria or [] %}
         <li><b>{{ c.name|short }}</b>{{ m.levels(c) }}<span class="num">{% if c.na %}-{% else %}{{ c.score|num }}/{{ c.max|num }}{% endif %}</span>{% if c.reason %}<p>{{ c.reason }}</p>{% endif %}</li>
         {% endfor %}
       </ul>
+      {% endif %}
       <div class="actions" style="margin-top:12px">
         {% if p.id in mine %}<span class="muted">ภาพนี้คุณเป็นผู้ส่ง ต้องให้คนอื่นยืนยัน</span>
         {% else %}<form method="post" action="/admin/photos/{{ p.id }}/verify" class="inline"><button class="btn primary">ตรงกับภาพ ยืนยันคะแนนนี้</button></form>{% endif %}

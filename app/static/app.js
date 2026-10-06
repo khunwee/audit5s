@@ -322,6 +322,29 @@
     }, 5000);
   }
 
+  // ------------------------------------------------------------ วาดกรอบโซนบนภาพอ้างอิง (เมาส์และนิ้ว)
+  var stage = $('#zone-stage');
+  if (stage) {
+    var draw = $('#zone-draw'), zform = $('#zone-form'), hint = $('#zone-hint'), start = null;
+    var at = function (e) {
+      var r = stage.getBoundingClientRect();
+      return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) };
+    };
+    var show = function (a, b) {
+      var x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y), x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+      draw.hidden = false;
+      draw.style.left = x1 * 100 + '%'; draw.style.top = y1 * 100 + '%';
+      draw.style.width = (x2 - x1) * 100 + '%'; draw.style.height = (y2 - y1) * 100 + '%';
+      zform.x1.value = Math.round(x1 * 1000); zform.y1.value = Math.round(y1 * 1000);
+      zform.x2.value = Math.round(x2 * 1000); zform.y2.value = Math.round(y2 * 1000);
+      hint.textContent = 'กรอบที่วาด: กว้าง ' + Math.round((x2 - x1) * 100) + '% สูง ' + Math.round((y2 - y1) * 100) + '% ของภาพ วาดใหม่ได้ถ้ายังไม่ตรง';
+    };
+    stage.addEventListener('pointerdown', function (e) { start = at(e); stage.setPointerCapture(e.pointerId); show(start, start); e.preventDefault(); });
+    stage.addEventListener('pointermove', function (e) { if (start) show(start, at(e)); });
+    stage.addEventListener('pointerup', function (e) { if (start) { show(start, at(e)); start = null; } });
+    stage.addEventListener('pointercancel', function () { start = null; });
+  }
+
   // ------------------------------------------------------------ ฟอร์มที่แสดงช่องตามตัวเลือก
   $$('.channel-form').forEach(function (form) {
     var sel = $('[data-kind]', form);

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
-from . import config, security, settings_store, storage
+from . import config, rules, security, settings_store, storage
 from .photos import SOURCES, area_label, area_types
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -65,7 +65,7 @@ templates.env.filters.update(dt=f_dt, d=f_date, num=f_num, mb=f_mb, short=f_shor
 templates.env.globals.update(AREA_TYPES=config.AREA_TYPES, ROLES=config.ROLES, STATUS=STATUS,
                              APP_NAME=config.APP_NAME, APP_VERSION=config.APP_VERSION, band=band,
                              can=security.can, manages=security.manages, PERMS=security.PERMS,
-                             area_label=area_label, SOURCES=SOURCES)
+                             area_label=area_label, SOURCES=SOURCES, CHECK_STATUS=rules.STATUS)
 
 
 def flash(request, message: str, kind: str = "ok"):

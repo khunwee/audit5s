@@ -20,11 +20,16 @@
       <label class="check"><input type="checkbox" name="allow_na" value="1"{{ ' checked' if c and c.allow_na }}><span>ให้ AI ข้ามได้เมื่อภาพไม่มีหลักฐานพอ <em class="muted">(เกณฑ์ที่ข้ามจะไม่นำมาคิดทั้งคะแนนและคะแนนเต็มของภาพนั้น)</em></span></label>
     </div>
   </div>
+  <label class="field"><span>ในโหมดรายการตรวจ หมวดนี้ได้คะแนนจาก</span>
+    <select name="kind">
+      <option value="ai"{{ ' selected' if not c or c.kind != 'sustain' }}>รายการตรวจที่ AI ตรวจจากภาพ</option>
+      <option value="sustain"{{ ' selected' if c and c.kind == 'sustain' }}>ระบบคำนวณ: ข้อที่พบซ้ำจากรอบก่อน และงานแก้ไขที่เกินกำหนด (เหมาะกับ สร้างนิสัย)</option>
+    </select></label>
   <div class="form-foot"><button class="btn primary">{{ 'บันทึกเกณฑ์' if c else 'เพิ่มเกณฑ์' }}</button></div>
 </form>
 {% endmacro %}
 {% block content %}
-<div class="page-head"><div><h1>เกณฑ์การให้คะแนน</h1><p>คะแนนเต็มรวมของเกณฑ์ที่เปิดใช้: <span class="num">{{ total|num }}</span> คะแนน</p></div></div>
+<div class="page-head"><div><h1>หมวดและคะแนนเต็ม</h1><p>คะแนนเต็มรวมของหมวดที่เปิดใช้: <span class="num">{{ total|num }}</span> คะแนน, เกณฑ์ฉบับที่ {{ rule_rev }}</p></div></div>
 {% include "admin/_nav.html" %}
 <div class="stack">
   <p class="note blue">AI จะอ่านคำอธิบายระดับ 0 ถึง 4 ของแต่ละเกณฑ์ แล้วเลือกระดับที่ตรงกับภาพ ยิ่งเขียนให้นับได้และมองเห็นได้ (เช่น จำนวนจุดที่พบ) คะแนนยิ่งสม่ำเสมอ
@@ -40,6 +45,12 @@
     {% endfor %}
     <details class="edit add"><summary>เพิ่มเกณฑ์ใหม่</summary>{{ form(none) }}</details>
   </section>
+  {% if history %}
+  <section class="panel">
+    <h2>ประวัติการแก้เกณฑ์ 15 ครั้งล่าสุด</h2>
+    <ul class="alert-list">{% for x in history %}<li><span class="muted">{{ x.at|dt }} โดย {{ x.username }}</span> {{ x.detail }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
   <form method="post" action="/admin/criteria/reset" data-confirm="ลบเกณฑ์ทั้งหมดแล้วแทนด้วยเกณฑ์ตั้งต้น 5ส จำนวน 5 ข้อ ข้อละ 20 คะแนน"><button class="btn small quiet">คืนค่าเกณฑ์ตั้งต้น 5ส</button></form>
 </div>
 {% endblock %}

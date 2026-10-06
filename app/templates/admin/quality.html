@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}ความแม่นของ AI{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>ความแม่นของ AI</h1><p>เทียบสิ่งที่ AI เสนอกับสิ่งที่คนยืนยัน จาก {{ q.photos }} ภาพที่ยืนยันแล้วในโหมดรายการตรวจ</p></div></div>
+{% include "admin/_nav.html" %}
+<form method="get" class="filters" data-autosubmit>
+  <label class="field"><span>รอบการตรวจ</span><select name="round"><option value="0">ทุกรอบ</option>{% for r in rounds %}<option value="{{ r.id }}"{{ ' selected' if r.id == round }}>{{ r.name }}</option>{% endfor %}</select></label>
+</form>
+{% if not q.total.n %}
+  <div class="empty"><h2>ยังไม่มีข้อมูลให้วัด</h2><p>ตัวเลขจะขึ้นเมื่อมีภาพในโหมดรายการตรวจที่หัวหน้าหรือกรรมการยืนยันหรือปรับผลแล้ว</p></div>
+{% else %}
+<div class="stack">
+  <div class="tiles">
+    <div class="tile {{ band(q.total.pct) }}"><b>{{ q.total.pct|num }}%</b><span>AI ตรงกับคน จาก {{ q.total.n }} ข้อ</span></div>
+    <div class="tile low"><b>{{ q.total.false_alarm }}</b><span>AI แจ้งว่าไม่ผ่าน แต่คนว่าผ่าน</span></div>
+    <div class="tile low"><b>{{ q.total.miss }}</b><span>AI ว่าผ่าน แต่คนพบข้อบกพร่อง</span></div>
+    <div class="tile mid"><b>{{ q.total.severity }}</b><span>ไม่ผ่านทั้งคู่ แต่ระดับต่างกัน</span></div>
+    <div class="tile ink"><b>{{ q.total.visibility }}</b><span>เห็นต่างว่ามองเห็นหรือไม่</span></div>
+  </div>
+  <section>
+    <h2 style="margin-bottom:8px">รายข้อ เรียงจากข้อที่ AI พลาดบ่อย</h2>
+    <div class="table-wrap"><table>
+      <tr><th>ข้อ</th><th class="r">ตรวจ</th><th class="r">ตรงกัน</th><th class="r">แจ้งเกิน</th><th class="r">มองข้าม</th><th class="r">ระดับต่าง</th></tr>
+      {% for e in q.rows %}<tr><td><b>{{ e.code }}</b> {{ e.text }}</td><td class="r">{{ e.n }}</td><td class="r">{{ e.pct|num }}%</td><td class="r">{{ e.false_alarm }}</td><td class="r">{{ e.miss }}</td><td class="r">{{ e.severity }}</td></tr>{% endfor %}
+    </table></div>
+    <p class="muted" style="margin-top:8px">ข้อที่ตรงกันต่ำ ให้เขียนสภาพที่ถูกต้องและเงื่อนไขของบกพร่องเล็กน้อยกับมากให้ชัดขึ้นที่หน้า รายการตรวจ ภาพที่ยืนยันแล้วส่งออกเป็นชุดข้อมูลสำหรับฝึกโมเดลตรวจจับได้จากเมนู ส่งออกข้อมูล ในหน้าอันดับ</p>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

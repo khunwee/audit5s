@@ -344,7 +344,7 @@ def test_08_override_and_summary():
     assert p.overridden and p.percent == 100.0 and p.analysis["ai_original"]["percent"] == 50.0
     assert S["member"].post(f"/admin/photos/{pid}/override", data={"note": "ขอเพิ่มคะแนน"}).status_code == 403
     page = c.get(f"/photos/{pid}")
-    assert "กรรมการปรับคะแนนภาพนี้" in page.text and "คะแนนเดิมจาก AI" in page.text
+    assert "กรรมการปรับผลของภาพนี้" in page.text and "คะแนนเดิมจาก AI" in page.text
     r = c.post(f"/admin/rounds/{rid}/dept/{d['PRD']}/summarize")
     assert r.status_code == 303
     page = c.get(f"/rounds/{rid}/dept/{d['PRD']}")

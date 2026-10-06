@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}งานแก้ไข{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>งานแก้ไข</h1><p>ข้อบกพร่องที่ยืนยันแล้ว พร้อมผู้รับผิดชอบและกำหนดเสร็จ</p></div>
+  {% if can(user, 'export') %}<div class="actions no-print"><a class="btn small" href="/actions.csv{{ '?dept=' ~ dept if dept }}">ส่งออก (.csv)</a></div>{% endif %}</div>
+<div class="tiles" style="margin-bottom:16px">
+  <a class="tile ink" href="?dept={{ dept }}&status=open" style="text-decoration:none;color:inherit"><b>{{ counts.open }}</b><span>เปิดอยู่</span></a>
+  <a class="tile low" href="?dept={{ dept }}&status=overdue" style="text-decoration:none;color:inherit"><b>{{ counts.overdue }}</b><span>เกินกำหนด</span></a>
+  <a class="tile good" href="?dept={{ dept }}&status=done" style="text-decoration:none;color:inherit"><b>{{ counts.done }}</b><span>ปิดแล้ว</span></a>
+</div>
+<form method="get" class="filters no-print" data-autosubmit>
+  <label class="field"><span>แผนก</span><select name="dept">{% if depts|length != 1 %}<option value="0">ทุกแผนก</option>{% endif %}{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if d.id == dept }}>{{ d.name }}</option>{% endfor %}</select></label>
+  <label class="field"><span>สถานะ</span><select name="status">
+    <option value="open"{{ ' selected' if status == 'open' }}>เปิดอยู่</option>
+    <option value="overdue"{{ ' selected' if status == 'overdue' }}>เกินกำหนด</option>
+    <option value="done"{{ ' selected' if status == 'done' }}>ปิดแล้ว</option>
+    <option value="all"{{ ' selected' if status == 'all' }}>ทั้งหมด</option></select></label>
+</form>
+{% if not items %}
+  <div class="empty"><h2>ไม่มีงานแก้ไขตามเงื่อนไขนี้</h2><p>งานแก้ไขถูกสร้างจากข้อที่ไม่ผ่าน เมื่อหัวหน้าหรือกรรมการยืนยันผลของภาพ</p></div>
+{% else %}
+<section class="panel">
+  {% for x in items %}
+  {% set late = x.status == 'open' and x.due_date and x.due_date < today %}
+  {% set editable = can_score or x.department_id in mine %}
+  <details class="edit">
+    <summary><span><b>{{ x.title }}</b><br><span class="muted">{{ x.department.name }}, {{ x.area_name }}, ผู้รับผิดชอบ {{ x.pic or 'ยังไม่ระบุ' }}, กำหนดเสร็จ {{ x.due_date|d }}</span></span>
+      <span><span class="chip {{ 'chip-error' if x.severity == 'major' else 'chip-rejected' }}">{{ 'บกพร่องมาก' if x.severity == 'major' else 'เล็กน้อย' }}</span>
+        <span class="chip {{ 'chip-done' if x.status == 'done' else 'chip-error' if late else 'chip-pending' }}">{{ 'ปิดแล้ว' if x.status == 'done' else 'เกินกำหนด ' ~ (today - x.due_date).days ~ ' วัน' if late else 'เปิดอยู่' }}</span></span></summary>
+    <div class="inner">
+      {% if x.detail %}<p style="white-space:pre-line">{{ x.detail }}</p>{% endif %}
+      <p class="muted">สร้างเมื่อ {{ x.created_at|dt }} โดย {{ x.created_by or '-' }}{% if x.photo_id %}, <a href="/photos/{{ x.photo_id }}">ดูภาพที่พบ</a>{% endif %}{% if x.after_photo_id %}, <a href="/photos/{{ x.after_photo_id }}">ดูภาพหลังแก้ไข</a>{% endif %}</p>
+      {% if x.status == 'done' %}
+        <p>ปิดเมื่อ {{ x.closed_at|dt }} โดย {{ x.closed_by }}: {{ x.close_note }}</p>
+        {% if can_score %}<form method="post" action="/actions/{{ x.id }}/reopen" data-confirm="เปิดงานนี้อีกครั้ง"><button class="btn small">เปิดงานอีกครั้ง</button></form>{% endif %}
+      {% elif editable %}
+        <form method="post" action="/actions/save">
+          <input type="hidden" name="id" value="{{ x.id }}">
+          <label class="field"><span>สิ่งที่ต้องแก้ไข</span><input type="text" name="title" value="{{ x.title }}" required maxlength="400"></label>
+          <div class="grid-2">
+            <label class="field"><span>ผู้รับผิดชอบ</span><input type="text" name="pic" value="{{ x.pic }}" maxlength="120"></label>
+            <label class="field"><span>กำหนดเสร็จ</span><input type="date" name="due_date" value="{{ x.due_date or '' }}"></label>
+          </div>
+          <button class="btn small">บันทึกผู้รับผิดชอบและกำหนดเสร็จ</button>
+        </form>
+        <form method="post" action="/actions/{{ x.id }}/close" style="margin-top:12px">
+          <label class="field"><span>ปิดงาน: สิ่งที่ได้ทำ</span><input type="text" name="note" required minlength="3" maxlength="1000"></label>
+          <div class="actions"><button class="btn small primary">ปิดงานนี้</button>
+            {% if x.photo_id %}<a class="btn small quiet" href="/capture?after={{ x.photo_id }}">ส่งภาพหลังแก้ไข (ผ่านแล้วระบบปิดงานให้เอง)</a>{% endif %}</div>
+        </form>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

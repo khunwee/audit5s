@@ -26,6 +26,7 @@ EVENTS = {
     "result": "ผลวิเคราะห์จาก AI (คะแนนและสิ่งที่ควรทำก่อน)",
     "problem": "เฉพาะภาพที่ใช้ไม่ได้หรือวิเคราะห์ไม่สำเร็จ",
     "round": "เปิดและปิดรอบการตรวจ",
+    "action": "งานแก้ไข: มอบหมายใหม่ และงานที่เกินกำหนด",
     "system": "เรื่องถึงผู้ดูแลระบบ (พื้นที่ การสำรอง ปัญหา AI รอบใกล้สิ้นสุด)",
 }
 
@@ -152,6 +153,9 @@ def build(db, kind: str, round_id, dept_id, events: list):
     first = events[0].payload or {}
     if kind == "system":
         return dict(title="[5ส Vision] แจ้งผู้ดูแลระบบ", text=first.get("text", ""), data=dict(event="system"))
+    if kind == "action":
+        return dict(title=f"[5ส Vision] งานแก้ไขของ {dname}", text=first.get("text", ""),
+                    data=dict(event="action", department=dname))
     if kind == "round":
         action = first.get("action")
         if action == "open":

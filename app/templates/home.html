@@ -51,7 +51,7 @@
 
   <div class="cols cols-side">
     <section>
-      <div class="split" style="margin-bottom:10px"><h2>อันดับล่าสุด</h2>{% if show_rank %}<span><a href="/ranking?round={{ rnd.id }}">ดูทั้งหมด</a>, <a href="/trend">แนวโน้ม</a></span>{% endif %}</div>
+      <div class="split" style="margin-bottom:10px"><h2>อันดับล่าสุด</h2>{% if show_rank %}<span><a href="/ranking?round={{ rnd.id }}">ดูทั้งหมด</a>, <a href="/dashboard?round={{ rnd.id }}">ภาพรวม</a>, <a href="/trend">แนวโน้ม</a></span>{% endif %}</div>
       {% if not show_rank %}
         <div class="empty"><p>อันดับของรอบนี้จะเปิดให้ดูเมื่อปิดรอบการตรวจ</p></div>
       {% elif not ranking.ranked %}
