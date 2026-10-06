@@ -15,7 +15,7 @@
 
 ออกแบบให้ใช้ของฟรีทั้งหมด: โค้ดรันบน Render (ฟรี) ฐานข้อมูล Neon (ฟรี) และ AI จาก Google AI Studio (โควตาฟรี) หรือรันบนเครื่องในโรงงานโดยไม่ใช้ cloud เลยก็ได้
 
-รุ่น 1.3.0, ต้องการ Python 3.10 ขึ้นไป
+รุ่น 1.3.1, ต้องการ Python 3.10 ขึ้นไป
 
 ขั้นตอนติดตั้งและนำขึ้น host ฟรีแบบทีละขั้น อยู่ในไฟล์ [DEPLOY.md](DEPLOY.md)
 
@@ -139,7 +139,7 @@ Linux และ macOS: `./run.sh`
 ```
 git init
 git add .
-git commit -m "5S Vision 1.3.0"
+git commit -m "5S Vision 1.3.1"
 git branch -M main
 git remote add origin https://github.com/<ชื่อบัญชี>/<ชื่อ repo>.git
 git push -u origin main

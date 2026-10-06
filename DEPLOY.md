@@ -70,7 +70,7 @@ pytest -q
 cd C:\Projects\fives-vision
 git init
 git add .
-git commit -m "5S Vision 1.3.0"
+git commit -m "5S Vision 1.3.1"
 git branch -M main
 git remote add origin https://github.com/ชื่อบัญชี/fives-vision.git
 git push -u origin main
@@ -146,7 +146,7 @@ postgresql://neondb_owner:xxxxxxxx@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/n
 
 1. เปิดลิงก์ `https://ชื่อบริการ.onrender.com`
 2. เข้าสู่ระบบด้วย `admin` กับรหัสใน `ADMIN_PASSWORD` ระบบจะให้ตั้งรหัสผ่านใหม่ทันที
-3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.3.0"}`
+3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.3.1"}`
 
 ถ้า build ไม่ผ่านหรือเปิดไม่ได้ ดูแท็บ Logs ของบริการ แล้วเทียบกับส่วน J
 
@@ -266,6 +266,7 @@ git push
 | Logs แจ้ง password authentication failed | รหัสผ่านใน connection string ไม่ตรง | กด Reset password ใน Neon แล้วนำ connection string ใหม่ไปใส่ใน Render |
 | เข้าสู่ระบบแล้วเด้งกลับหน้า login ทุกครั้ง (ตอนรันในโรงงานด้วย http) | ตั้ง `COOKIE_SECURE=1` แต่เปิดผ่าน http | ใช้ `COOKIE_SECURE=1` เฉพาะเมื่อเปิดผ่าน https |
 | ส่งภาพแล้วขึ้นว่า รอ AI วิเคราะห์ ค้างนาน | ยังไม่ตั้งค่า AI, key ผิด หรือครบโควตา | ดูหน้า จัดการระบบ > ภาพรวม จะบอกสาเหตุ แล้วกดทดสอบที่หน้าตั้งค่า |
+| กดทดสอบ AI แล้วขึ้น 404 ว่ารุ่น "is no longer available to new users" | รุ่นนั้นเลิกเปิดให้ key ใหม่ใช้ แม้ยังอยู่ในรายชื่อ | พิมพ์ชื่อรุ่นที่ข้อความแนะนำ (เช่น `gemini-3.8-flash`) ในช่องโมเดล กดทดสอบอีกครั้ง แล้วบันทึกการตั้งค่า |
 | ภาพขึ้นว่า วิเคราะห์ไม่สำเร็จ | AI ปฏิเสธ หรือชื่อโมเดลถูกยกเลิก | เลือกโมเดลใหม่จากปุ่ม ดึงรายชื่อโมเดล แล้วที่หน้ารอบการตรวจกด วิเคราะห์ภาพที่ผิดพลาดใหม่ |
 | ส่งภาพไม่ได้ แจ้งว่าพื้นที่จัดเก็บเต็ม | ใช้ครบงบพื้นที่ | สำรองรอบเก่าแล้วลบภาพเต็ม (ส่วน G) |
 | ปุ่มเว็บแคมแจ้งว่าใช้ไม่ได้ | เปิดผ่าน http ที่ไม่ใช่ localhost | บน Render เป็น https ใช้ได้ ในโรงงานให้ใช้ปุ่ม ถ่ายภาพ แทน |

@@ -129,6 +129,10 @@ def _http_error(r: httpx.Response) -> AIError:
         hint = " ตรวจ API key ในหน้าตั้งค่า"
     elif code == 404:
         hint = " ตรวจชื่อโมเดลและ Base URL ในหน้าตั้งค่า"
+    # ผู้ให้บริการมักบอกชื่อรุ่นที่ใช้แทนรุ่นที่เลิกให้บริการ: ยกขึ้นมาเป็นคำแนะนำที่ทำตามได้ทันที
+    better = re.search(r"use (?:models/)?([A-Za-z0-9][\w.\-]*(?:flash|pro|lite)[\w.\-]*)", msg)
+    if code in (400, 404) and better:
+        hint = (f" วิธีแก้: พิมพ์ {better.group(1).rstrip('.')} ในช่องโมเดล กดทดสอบอีกครั้ง แล้วบันทึกการตั้งค่า")
     return AIError(f"ผู้ให้บริการ AI ปฏิเสธคำขอ ({code}) {msg}{hint}", retryable=False)
 
 
@@ -224,6 +228,15 @@ def call(cfg: dict, system: str, user: str, image: bytes = None) -> str:
     raise AIError(f"ไม่รู้จักผู้ให้บริการ AI ชนิด {cfg['type']}", retryable=False)
 
 
+def _model_rank(name: str) -> tuple:
+    """เรียงรายชื่อโมเดล: รุ่น Flash ตัวใหม่สุดขึ้นก่อน เพราะรุ่นเก่าที่ยังอยู่ในรายชื่ออาจไม่เปิดให้ key ใหม่ใช้แล้ว"""
+    m = re.search(r"(\d+(?:\.\d+)?)", name)
+    version = float(m.group(1)) if m else 0.0
+    family = 0 if "flash" in name and "lite" not in name else 1 if "flash" in name else 2
+    unstable = 1 if any(x in name for x in ("preview", "exp", "latest")) else 0
+    return (unstable, family, -version, name)
+
+
 def list_models(cfg: dict) -> list:
     """ดึงรายชื่อโมเดลที่ key นี้ใช้ได้ (ชื่อรุ่นเปลี่ยนบ่อย จึงไม่ฝังไว้ในโค้ด)"""
     try:
@@ -249,7 +262,7 @@ def list_models(cfg: dict) -> list:
                         break
                 skip = ("embedding", "tts", "image", "audio", "veo", "lyria", "live", "aqa", "robotics")
                 good = [n for n in names if n and not any(x in n for x in skip)]
-                return sorted(good, key=lambda n: (0 if "flash" in n else 1, n))
+                return sorted(good, key=_model_rank)
             if cfg["type"] == "openai":
                 if not cfg["base"]:
                     raise AIError("ใส่ Base URL ก่อน", retryable=False)
