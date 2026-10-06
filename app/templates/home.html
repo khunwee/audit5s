@@ -37,12 +37,14 @@
       {{ m.tag(mine.avg, true) }}
       <dl class="facts">
         {% if show_rank %}<div><dt>อันดับ</dt><dd>{{ mine.rank if mine.rank else 'ยังไม่จัด' }}</dd></div>{% endif %}
-        <div><dt>ภาพที่ให้คะแนนแล้ว</dt><dd>{{ mine.scored }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        <div><dt>ภาพที่นับคะแนน</dt><dd>{{ mine.scored }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        {% if mine.areas_required %}<div><dt>จุดตรวจบังคับ</dt><dd>{{ mine.areas_covered }} / {{ mine.areas_required }}</dd></div>{% endif %}
         <div><dt>รอวิเคราะห์</dt><dd>{{ mine.waiting }}</dd></div>
         {% if mine.rejected or mine.errors %}<div><dt>ต้องถ่ายใหม่หรือมีปัญหา</dt><dd>{{ mine.rejected + mine.errors }}</dd></div>{% endif %}
       </dl>
     </div>
-    {% if mine.scored < rnd.min_photos %}<p style="margin-top:10px">ส่งภาพอีก {{ rnd.min_photos - mine.scored }} ภาพเพื่อเข้าการจัดอันดับ</p>{% endif %}
+    {% if mine.scored < rnd.min_photos %}<p style="margin-top:10px">ต้องมีภาพที่นับคะแนนอีก {{ rnd.min_photos - mine.scored }} ภาพเพื่อเข้าการจัดอันดับ</p>{% endif %}
+    {% if mine.missing %}<p style="margin-top:10px">จุดตรวจบังคับที่ยังขาด: {{ mine.missing|join(', ') }}</p>{% endif %}
     <div class="actions" style="margin-top:10px"><a class="btn small" href="/rounds/{{ rnd.id }}/dept/{{ mine.dept.id }}">ดูรายงานและคำแนะนำของแผนก</a></div>
   </section>
   {% endif %}

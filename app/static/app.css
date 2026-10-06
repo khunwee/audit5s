@@ -15,6 +15,7 @@
   --r: 4px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* ให้ attribute hidden ชนะ display ของคลาส เช่น .field */
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--floor); color: var(--ink);
@@ -357,3 +358,27 @@ table.trend th a { color: inherit; }
 }
 .cam-list .btn { flex: none; white-space: nowrap; }
 .table-wrap table.roles td:first-child, .table-wrap table.roles th:first-child { min-width: 210px; }
+
+/* ---------- รุ่น 1.2: คิวยืนยันผล จุดตรวจ แจ้งเตือนผู้ดูแล ---------- */
+.alert-list { list-style: none; margin: 0; padding: 0; }
+.alert-list li { padding: 8px 0; border-top: 1px solid var(--line); }
+.alert-list li:first-child { border-top: 0; }
+.alert-list .muted { font-size: .84rem; display: block; }
+.verify-card { background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--r); padding: 12px; display: grid; gap: 12px; }
+.verify-card img { width: 100%; max-height: 60vh; object-fit: contain; background: #111; border-radius: 3px; }
+.verify-rows { margin: 8px 0 0; padding: 0; list-style: none; }
+.verify-rows li { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); font-size: .93rem; }
+.verify-rows li p { grid-column: 1 / -1; margin: 0; color: var(--ink-2); font-size: .88rem; }
+.area-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 18px 0 6px; }
+@media (min-width: 860px) { .verify-card { grid-template-columns: 1.1fr 1fr; align-items: start; } }
+
+/* ---------- จอเล็กมากและจอแนวนอนของมือถือ ---------- */
+@media (max-width: 420px) {
+  .q-card { grid-template-columns: 64px 1fr; gap: 10px; }
+  .q-card img { width: 64px; height: 64px; }
+  .page { padding-left: 12px; padding-right: 12px; }
+}
+@media (max-height: 480px) {
+  .topbar { position: static; }          /* จอเตี้ย: ไม่ให้แถบบนกินพื้นที่ตลอดเวลา */
+  .webcam video { max-height: 78vh; }
+}

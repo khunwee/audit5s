@@ -4,7 +4,7 @@ import json
 import os
 import secrets
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -13,10 +13,10 @@ from sqlalchemy import case, func
 from starlette.background import BackgroundTask
 
 from . import ai, backup, cameras, config, notify, scoring, security, settings_store, storage, worker
-from .db import (DEFAULT_CRITERIA, AuditLog, Camera, Channel, Criterion, Department, DeptSummary, NotifyEvent,
+from .db import (DEFAULT_CRITERIA, AuditArea, AuditLog, Camera, Channel, Criterion, Department, DeptSummary, NotifyEvent,
                  NotifyLog, Photo, PhotoImage, PhotoThumb, Round, User, get_db, log, now, rubric_snapshot)
 from .photos import area_types
-from .routes_main import download, form_data
+from .routes_main import download, form_data, may_verify
 from .security import admin_user, can, current_user, manager_user, need
 from .web import flash, render, to_bkk
 
@@ -58,7 +58,14 @@ def overview(request: Request, user=Depends(manager_user), db=Depends(get_db)):
                   open_rounds=db.query(Round).filter(Round.status == "open").count(),
                   n_channels=db.query(Channel).filter(Channel.active.is_(True)).count(),
                   n_cameras=db.query(Camera).filter(Camera.active.is_(True)).count(),
-                  n_review=db.query(Photo).filter(Photo.review_flag.is_(True)).count())
+                  n_review=db.query(Photo).filter(Photo.review_flag.is_(True)).count(),
+                  n_unverified=db.query(Photo).filter(Photo.status == "done", Photo.verified_at.is_(None)).count(),
+                  n_areas=db.query(AuditArea).filter(AuditArea.active.is_(True)).count(),
+                  system_channel=any("system" in (c.events or []) for c in
+                                     db.query(Channel).filter(Channel.active.is_(True)).all()),
+                  alerts=db.query(AuditLog).filter(AuditLog.action == "alert",
+                                                   AuditLog.at > now() - timedelta(days=14))
+                  .order_by(AuditLog.id.desc()).limit(8).all())
 
 
 # --------------------------------------------------------------------------- รอบการตรวจ
@@ -310,6 +317,62 @@ def department_delete(did: int, request: Request, user=Depends(need("departments
     return back("/admin/departments")
 
 
+# --------------------------------------------------------------------------- จุดตรวจที่โรงงานกำหนด
+@router.get("/areas", response_class=HTMLResponse)
+def areas_page(request: Request, user=Depends(need("departments")), db=Depends(get_db)):
+    depts = db.query(Department).filter(Department.active.is_(True)).order_by(Department.name).all()
+    items = {}
+    for a in db.query(AuditArea).order_by(AuditArea.active.desc(), AuditArea.sort_order, AuditArea.id).all():
+        items.setdefault(a.department_id, []).append(a)
+    counts = dict(db.query(Photo.area_id, func.count(Photo.id)).filter(Photo.area_id.isnot(None))
+                  .group_by(Photo.area_id).all())
+    return render(request, "admin/areas.html", user, db, depts=depts, items=items, counts=counts,
+                  s=settings_store.load())
+
+
+@router.post("/areas/save")
+def area_save(request: Request, form=Depends(form_data), user=Depends(need("departments")), db=Depends(get_db)):
+    aid = _int(form.get("id"))
+    dept = db.get(Department, _int(form.get("department_id")))
+    name = (form.get("name") or "").strip()[:160]
+    if dept is None or not name:
+        flash(request, "เลือกแผนกและใส่ชื่อจุดตรวจ", "err")
+        return back("/admin/areas")
+    if db.query(AuditArea).filter(AuditArea.department_id == dept.id, AuditArea.name == name, AuditArea.id != aid).first():
+        flash(request, f"แผนก {dept.name} มีจุดตรวจชื่อ {name} อยู่แล้ว", "err")
+        return back("/admin/areas")
+    a = db.get(AuditArea, aid) if aid else None
+    if a is None:
+        a = AuditArea()
+        db.add(a)
+    types = area_types(settings_store.load())
+    a.department_id, a.name = dept.id, name
+    a.area_type = form.get("area_type") if form.get("area_type") in types else types[0]
+    a.standard = (form.get("standard") or "").strip()[:1500]
+    a.required = form.get("required") == "1"
+    a.active = form.get("active", "1") == "1"
+    a.sort_order = _int(form.get("sort_order"), 100)
+    log(db, user, "save_area", f"{dept.name} / {name}{' (บังคับ)' if a.required else ''}")
+    db.commit()
+    flash(request, f"บันทึกจุดตรวจ {name} แล้ว")
+    return back("/admin/areas")
+
+
+@router.post("/areas/{aid}/delete")
+def area_delete(aid: int, request: Request, user=Depends(need("departments")), db=Depends(get_db)):
+    a = db.get(AuditArea, aid)
+    if a is not None:
+        if db.query(Photo).filter(Photo.area_id == aid).count():
+            a.active = False
+            flash(request, f"จุดตรวจ {a.name} มีภาพในระบบ จึงปิดใช้แทนการลบ ภาพและคะแนนเดิมยังอยู่", "warn")
+        else:
+            db.delete(a)
+            flash(request, f"ลบจุดตรวจ {a.name} แล้ว")
+        log(db, user, "delete_area", a.name)
+        db.commit()
+    return back("/admin/areas")
+
+
 # --------------------------------------------------------------------------- ผู้ใช้และสิทธิ์รายบัญชี
 @router.get("/users", response_class=HTMLResponse)
 def users_page(request: Request, user=Depends(admin_user), db=Depends(get_db)):
@@ -393,6 +456,13 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
            "ai_passes": 2 if form.get("ai_passes") == "2" else 1,
            "after_replaces": form.get("after_replaces") == "1",
            "webcam_width": _int(form.get("webcam_width"), 1920, 640, 3840),
+           "allow_free_area": form.get("allow_free_area") == "1",
+           "require_coverage": form.get("require_coverage") == "1",
+           "verify_required": form.get("verify_required") == "1",
+           "host_limit_mb": _int(form.get("host_limit_mb"), 500, 20, 1000000),
+           "storage_warn_pct": _int(form.get("storage_warn_pct"), 80, 10, 99),
+           "max_photos_per_dept": _int(form.get("max_photos_per_dept"), 0, 0, 100000),
+           "backup_remind_days": _int(form.get("backup_remind_days"), 7, 0, 365),
            "ai_rpm": _int(form.get("ai_rpm"), 6, 1, 60),
            "ai_daily": _int(form.get("ai_daily"), 200, 1, 100000),
            "ai_max_attempts": _int(form.get("ai_max_attempts"), 4, 1, 10),
@@ -672,6 +742,17 @@ def storage_cleanup(request: Request, user=Depends(need("storage")), db=Depends(
     return back("/admin/storage")
 
 
+@router.post("/storage/compact")
+def storage_compact(request: Request, user=Depends(need("storage")), db=Depends(get_db)):
+    before = storage.physical_bytes(db)
+    storage.compact(db, full=True)
+    after = storage.physical_bytes(db)
+    log(db, user, "compact_storage", f"{(before or 0) / storage.MB:.1f} MB -> {(after or 0) / storage.MB:.1f} MB")
+    db.commit()
+    flash(request, f"คืนพื้นที่แล้ว ขนาดฐานข้อมูลก่อนทำ {(before or 0) / storage.MB:.1f} MB หลังทำ {(after or 0) / storage.MB:.1f} MB")
+    return back("/admin/storage")
+
+
 @router.get("/backup/system.json")
 def system_backup(user=Depends(need("storage")), db=Depends(get_db)):
     data = json.dumps(backup.system_json(db), ensure_ascii=False, indent=1).encode("utf-8")
@@ -709,6 +790,8 @@ def photo_override(pid: int, request: Request, form=Depends(form_data), user=Dep
     p = db.get(Photo, pid)
     if p is None:
         raise HTTPException(404, "ไม่พบภาพนี้")
+    if not may_verify(user, p):
+        raise HTTPException(403, "ปรับคะแนนภาพที่ตัวเองส่งไม่ได้ ให้กรรมการคนอื่นเป็นผู้ตรวจ")
     note = (form.get("note") or "").strip()[:1000]
     if len(note) < 5:
         flash(request, "ใส่เหตุผลที่ปรับคะแนน เพื่อให้ตรวจสอบย้อนหลังได้", "err")
@@ -737,6 +820,7 @@ def photo_override(pid: int, request: Request, form=Depends(form_data), user=Dep
     worker.apply_result(p, result, p.provider or "manual", p.model or "manual")
     p.overridden, p.override_by, p.override_note, p.override_at = True, user.full_name or user.username, note, now()
     p.review_flag = False
+    p.verified_by, p.verified_at = user.full_name or user.username, now()
     log(db, user, "override_score", f"ภาพ {p.id}: {p.score:g}/{p.max_score:g} เหตุผล: {note}")
     notify.emit(db, "result", round_id=p.round_id, department_id=p.department_id, photo_id=p.id)
     db.commit()
@@ -758,11 +842,20 @@ def photo_action(pid: int, action: str, request: Request, user=Depends(need("sco
             db.commit()
             worker.wake()
             flash(request, "ส่งภาพเข้าคิววิเคราะห์ใหม่แล้ว")
-    elif action == "accept":
-        p.review_flag = False
-        log(db, user, "accept_review", f"ภาพ {p.id}: ยืนยันคะแนนของ AI")
-        db.commit()
-        flash(request, "ยืนยันคะแนนของภาพนี้แล้ว")
+    elif action in ("verify", "accept"):
+        if not may_verify(user, p):
+            raise HTTPException(403, "ยืนยันภาพที่ตัวเองส่งไม่ได้ ให้กรรมการคนอื่นเป็นผู้ตรวจ")
+        if p.status != "done":
+            flash(request, "ยืนยันได้เฉพาะภาพที่ให้คะแนนแล้ว", "err")
+        else:
+            p.review_flag = False
+            p.verified_by, p.verified_at = user.full_name or user.username, now()
+            log(db, user, "verify_photo", f"ภาพ {p.id} {p.department.name} / {p.area_name}: ยืนยัน {p.score:g}/{p.max_score:g}")
+            db.commit()
+            flash(request, f"ยืนยันผลของภาพ {p.id} แล้ว")
+        target = request.headers.get("referer") or ""
+        if "/verify" in target:
+            return back(target)
     else:
         raise HTTPException(404, "ไม่รู้จักคำสั่งนี้")
     return back(f"/photos/{pid}")

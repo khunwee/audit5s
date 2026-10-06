@@ -32,6 +32,50 @@
     var maxSide = parseInt(cap.getAttribute('data-max-side'), 10) || 1600;
     var afterOf = cap.getAttribute('data-after') || '';
     var items = [], sending = false, pollTimer = null;
+    var defined = JSON.parse(cap.getAttribute('data-defined') || '{}');
+    var allowFree = cap.getAttribute('data-allow-free') !== '0';
+
+    // จุดตรวจ: แผนกที่โรงงานกำหนดจุดไว้ ให้เลือกจากรายการ (พิมพ์เองได้เมื่อผู้ดูแลอนุญาต)
+    var syncArea = function (it) {
+      var pick = $('[data-k=area_id]', it.el), chosen = /^[0-9]+$/.test(pick.value);
+      var listed = !$('[data-area-pick]', it.el).hidden;
+      $('[data-area-name]', it.el).hidden = listed && pick.value !== 'free';
+      $('[data-area-type]', it.el).hidden = listed && chosen;
+      if (chosen) {
+        var type = pick.options[pick.selectedIndex].getAttribute('data-type');
+        if (type) $('[data-k=area_type]', it.el).value = type;
+      }
+    };
+    var fillAreas = function (it, keep) {
+      var pick = $('[data-k=area_id]', it.el), list = defined[$('#dept').value] || [];
+      var old = keep ? pick.value : '';
+      while (pick.firstChild) pick.removeChild(pick.firstChild);
+      $('[data-area-pick]', it.el).hidden = !list.length;
+      if (list.length) {
+        var add = function (value, text, type) {
+          var o = document.createElement('option');
+          o.value = value; o.textContent = text; if (type) o.setAttribute('data-type', type);
+          pick.appendChild(o);
+        };
+        add('', 'เลือกจุดตรวจ');
+        list.forEach(function (a) { add(String(a.id), a.name + (a.required ? '' : ' (ไม่บังคับ)'), a.type); });
+        if (allowFree) add('free', 'จุดอื่น พิมพ์ชื่อเอง');
+        pick.value = old;
+        if (pick.selectedIndex < 0) pick.value = '';
+      }
+      syncArea(it);
+    };
+    var nameOf = function (it) {
+      var pick = $('[data-k=area_id]', it.el);
+      if (!$('[data-area-pick]', it.el).hidden) {
+        if (/^[0-9]+$/.test(pick.value)) return pick.options[pick.selectedIndex].textContent.replace(' (ไม่บังคับ)', '');
+        if (pick.value !== 'free') return '';
+      }
+      return $('[data-k=area_name]', it.el).value.trim();
+    };
+    $('#dept').addEventListener('change', function () {
+      items.forEach(function (it) { if (it.state === 'new' || it.state === 'fail') fillAreas(it, false); });
+    });
 
     var compress = function (file) {
       // ย่อภาพในเครื่องก่อนส่ง: ประหยัดเน็ตมือถือ และแปลงภาพ HEIC ของ iPhone เป็น JPEG
@@ -86,6 +130,8 @@
       $('[data-remove]', node).addEventListener('click', function () {
         items.splice(items.indexOf(it), 1); node.remove(); refresh();
       });
+      $('[data-k=area_id]', node).addEventListener('change', function () { syncArea(it); });
+      fillAreas(it, false);
       return it;
     };
 
@@ -99,6 +145,11 @@
         $('[data-k=area_name]', node).value = cap.getAttribute('data-area') || '';
         typeSel.value = cap.getAttribute('data-type') || typeSel.value;
         $('[data-k=note]', node).value = 'ภาพหลังแก้ไขของภาพเลขที่ ' + afterOf;
+        var pick = $('[data-k=area_id]', node), want = cap.getAttribute('data-area-id') || '';
+        if (!$('[data-area-pick]', node).hidden) {
+          pick.value = want; if (pick.selectedIndex < 0 || !want) pick.value = allowFree ? 'free' : '';
+          syncArea(it);
+        }
       } else if (last) {                     // จุดตรวจถัดไปมักเป็นพื้นที่ประเภทเดียวกัน
         typeSel.value = $('[data-k=area_type]', last.el).value;
       }
@@ -110,7 +161,7 @@
         it.blob = blob;
         $('img', node).src = URL.createObjectURL(blob);
         setState(it, 'new', 'ยังไม่ได้ส่ง');
-        if (!$('[data-k=area_name]', node).value) $('[data-k=area_name]', node).focus();
+        if (!nameOf(it)) ($('[data-area-pick]', node).hidden ? $('[data-k=area_name]', node) : $('[data-k=area_id]', node)).focus();
       });
     };
 
@@ -124,8 +175,9 @@
     });
 
     var sendOne = function (it) {
-      var name = $('[data-k=area_name]', it.el).value.trim();
+      var name = nameOf(it), pickValue = $('[data-k=area_id]', it.el).value;
       var fd = new FormData();
+      if (!$('[data-area-pick]', it.el).hidden && /^[0-9]+$/.test(pickValue)) fd.append('area_id', pickValue);
       fd.append('round_id', $('#round').value);
       fd.append('department_id', $('#dept').value);
       fd.append('area_name', name);
@@ -152,8 +204,12 @@
       if (sending) return;
       if (!$('#dept').value) { window.alert('เลือกแผนกเจ้าของพื้นที่ก่อนส่งภาพ'); $('#dept').focus(); return; }
       var todo = items.filter(function (i) { return (i.state === 'new' || i.state === 'fail') && i.blob; });
-      var missing = todo.filter(function (i) { return !$('[data-k=area_name]', i.el).value.trim(); })[0];
-      if (missing) { window.alert('ใส่ชื่อจุดตรวจให้ครบทุกภาพก่อนส่ง'); $('[data-k=area_name]', missing.el).focus(); return; }
+      var missing = todo.filter(function (i) { return !nameOf(i); })[0];
+      if (missing) {
+        window.alert('เลือกหรือใส่ชื่อจุดตรวจให้ครบทุกภาพก่อนส่ง');
+        ($('[data-area-pick]', missing.el).hidden ? $('[data-k=area_name]', missing.el) : $('[data-k=area_id]', missing.el)).focus();
+        return;
+      }
       sending = true; refresh();
       var chain = Promise.resolve();
       todo.forEach(function (it) { chain = chain.then(function () { return sendOne(it); }); });
@@ -311,6 +367,8 @@
       });
     };
     typeSel.addEventListener('change', show); show();
+    var preset = $('[data-preset]', box);
+    if (preset) preset.addEventListener('change', function () { if (preset.value) $('[data-f=base]', box).value = preset.value; });
     var payload = function () {
       return { slot: box.getAttribute('data-slot'), type: typeSel.value, base: $('[data-f=base]', box).value,
                key: $('[data-f=key]', box).value, model: $('[data-f=model]', box).value };

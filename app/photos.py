@@ -2,7 +2,9 @@
 from fastapi import HTTPException
 
 from . import config, imaging, notify, storage, worker
-from .db import Photo, PhotoImage, PhotoThumb, Round
+from sqlalchemy import func
+
+from .db import AuditArea, Photo, PhotoImage, PhotoThumb, Round
 
 SOURCES = {"mobile": "กล้องมือถือ", "gallery": "คลังภาพ", "webcam": "เว็บแคม", "ipcam": "กล้อง IP",
            "agent": "กล้อง IP (โปรแกรมในโรงงาน)"}
@@ -19,14 +21,33 @@ def area_label(value: str) -> str:
 
 def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, area_name: str, area_type: str = "",
                  note: str = "", uploader_id=None, uploader_name: str = "", source: str = "mobile",
-                 camera_id=None, after_of=None) -> Photo:
+                 camera_id=None, after_of=None, area_id=None, enforce_area: bool = False) -> Photo:
     if rnd is None or rnd.status != "open":
         raise HTTPException(400, "รอบการตรวจนี้ปิดรับภาพแล้ว")
-    area_name = (area_name or "").strip()[:160]
+    # จุดตรวจ: ใช้จุดที่โรงงานกำหนดก่อนเสมอ (เลือกจากรายการ หรือชื่อตรงกัน) จุดที่พิมพ์เองรับเมื่อผู้ดูแลอนุญาต
+    area = None
+    if area_id:
+        area = db.get(AuditArea, int(area_id))
+        if area is None or not area.active or area.department_id != department_id:
+            raise HTTPException(400, "จุดตรวจที่เลือกไม่ใช่ของแผนกนี้ หรือถูกปิดใช้แล้ว")
+    area_name = (area.name if area else (area_name or "")).strip()[:160]
     if not area_name:
         raise HTTPException(400, "ใส่ชื่อจุดตรวจก่อนส่งภาพ")
-    if storage.usage(db, s)["level"] == "full":
+    defined = db.query(AuditArea).filter(AuditArea.department_id == department_id, AuditArea.active.is_(True))
+    if area is None:
+        area = defined.filter(AuditArea.name == area_name).first()
+    if area is None and enforce_area and not s.get("allow_free_area", True) and defined.count():
+        raise HTTPException(400, "เลือกจุดตรวจจากรายการที่โรงงานกำหนดไว้ให้แผนกนี้")
+    if area is not None and area.area_type:
+        area_type = area.area_type
+    u = storage.usage(db, s)
+    if u["level"] == "full":
+        storage.check_alerts(db, s, u)
         raise HTTPException(507, "พื้นที่จัดเก็บเต็ม แจ้งผู้ดูแลระบบให้สำรองข้อมูลและลบภาพเก่าก่อน")
+    cap = int(s.get("max_photos_per_dept", 0) or 0)
+    if cap and db.query(func.count(Photo.id)).filter(Photo.round_id == rnd.id,
+                                                    Photo.department_id == department_id).scalar() >= cap:
+        raise HTTPException(400, f"แผนกนี้ส่งครบ {cap} ภาพของรอบนี้แล้ว ลบภาพที่ไม่ใช้ก่อนส่งเพิ่ม")
     if len(raw) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(413, "ไฟล์ภาพใหญ่เกิน 15 MB")
     try:
@@ -46,7 +67,8 @@ def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, are
               note=(note or "").strip()[:1000], sha256=img["sha256"], width=img["width"], height=img["height"],
               image_bytes=len(img["image"]), thumb_bytes=len(img["thumb"]), status="pending",
               source=source if source in SOURCES else "mobile", camera_id=camera_id,
-              after_of=int(after_of) if after_of else None, review_flag=False)
+              after_of=int(after_of) if after_of else None, review_flag=False,
+              area_id=area.id if area is not None else None, verified_by="")
     db.add(p)
     db.flush()
     db.add(PhotoImage(photo_id=p.id, data=img["image"]))
@@ -54,4 +76,6 @@ def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, are
     notify.emit(db, "upload", round_id=rnd.id, department_id=department_id, photo_id=p.id)
     db.commit()
     worker.wake()
+    if u["level"] != "ok" or u["host_level"] != "ok":
+        storage.check_alerts(db, s)
     return p

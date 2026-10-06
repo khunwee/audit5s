@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Reque
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import ai, backup, cameras, config, notify, photos as intake, scoring, security, settings_store, storage, worker
-from .db import (Camera, Department, DeptSummary, Photo, PhotoImage, PhotoThumb, Round, User, get_db,
+from .db import (AuditArea, Camera, Department, DeptSummary, Photo, PhotoImage, PhotoThumb, Round, User, get_db,
                  log, now)
 from .security import can, current_user, dept_ids, need
 from .web import flash, render
@@ -171,7 +171,13 @@ def capture(request: Request, after: int = 0, user=Depends(current_user), db=Dep
     if can(user, "cameras_use") and depts:
         cams = (db.query(Camera).filter(Camera.active.is_(True), Camera.department_id.in_([d.id for d in depts]))
                 .order_by(Camera.name).all())
+    defined = {}
+    if depts:
+        for a in (db.query(AuditArea).filter(AuditArea.active.is_(True), AuditArea.department_id.in_([d.id for d in depts]))
+                  .order_by(AuditArea.sort_order, AuditArea.id).all()):
+            defined.setdefault(str(a.department_id), []).append(dict(id=a.id, name=a.name, type=a.area_type, required=a.required))
     return render(request, "capture.html", user, db, rounds=rounds, depts=depts, areas=sorted(areas), before=before,
+                  defined=defined,
                   usage=storage.usage(db, s), ai_ready=ai.is_configured(s), cams=cams,
                   agent_online=cameras.agent_online())
 
@@ -179,7 +185,7 @@ def capture(request: Request, after: int = 0, user=Depends(current_user), db=Dep
 @router.post("/api/photos")
 def upload_photo(file: UploadFile = File(...), round_id: int = Form(...), department_id: int = Form(...),
                  area_name: str = Form(""), area_type: str = Form(""), note: str = Form(""),
-                 source: str = Form("mobile"), after_of: int = Form(0),
+                 source: str = Form("mobile"), after_of: int = Form(0), area_id: int = Form(0),
                  user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
     if department_id not in [d.id for d in upload_depts(user, db)]:
@@ -189,7 +195,7 @@ def upload_photo(file: UploadFile = File(...), round_id: int = Form(...), depart
                             area_name=area_name, area_type=area_type, note=note, uploader_id=user.id,
                             uploader_name=user.full_name or user.username,
                             source=source if source in ("mobile", "gallery", "webcam") else "mobile",
-                            after_of=after_of or None)
+                            after_of=after_of or None, area_id=area_id or None, enforce_area=True)
     return {"id": p.id, "status": p.status, "ai_ready": ai.is_configured(s)}
 
 
@@ -321,6 +327,8 @@ def photos(request: Request, round: int = 0, dept: int = 0, status: str = "", pa
             q = q.filter(Photo.review_flag.is_(True))
         elif status == "override":
             q = q.filter(Photo.overridden.is_(True))
+        elif status == "unverified":
+            q = q.filter(Photo.status == "done", Photo.verified_at.is_(None))
         total = q.count()
         page = max(1, page)
         items = q.order_by(Photo.id.desc()).offset((page - 1) * PAGE).limit(PAGE).all()
@@ -336,7 +344,34 @@ def photo_detail(pid: int, request: Request, user=Depends(current_user), db=Depe
     after = db.query(Photo).filter(Photo.after_of == p.id).order_by(Photo.id.desc()).first()
     can_fix = rnd.status == "open" and p.department_id in [d.id for d in upload_depts(user, db)]
     return render(request, "photo.html", user, db, p=p, rnd=rnd, deletable=can_delete(user, p, rnd),
-                  before=before, after=after, can_fix=can_fix)
+                  before=before, after=after, can_fix=can_fix, can_verify=may_verify(user, p))
+
+
+def may_verify(user: User, p: Photo) -> bool:
+    """ผู้ยืนยันต้องไม่ใช่คนที่ส่งภาพนั้นเอง (ยกเว้นผู้ดูแลระบบ) เพื่อให้มีคนที่สองดูหลักฐานเสมอ"""
+    return can(user, "score") and (user.role == "admin" or p.uploader_id != user.id)
+
+
+@router.get("/verify", response_class=HTMLResponse)
+def verify_queue(request: Request, round: int = 0, dept: int = 0, user=Depends(need("score")), db=Depends(get_db)):
+    """คิวยืนยันผล: ภาพที่ AI ให้คะแนนแล้วแต่ยังไม่มีคนดู เรียงภาพที่ AI ไม่นิ่งและคะแนนต่ำขึ้นก่อน"""
+    s = settings_store.load()
+    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rnd = db.get(Round, round) if round else active_round(db)
+    depts = db.query(Department).order_by(Department.name).all()
+    if not can_view_dept(user, -1, s):
+        depts = [d for d in depts if d.id in dept_ids(user)]
+    items, total = [], 0
+    if rnd:
+        q = db.query(Photo).filter(Photo.round_id == rnd.id, Photo.status == "done", Photo.verified_at.is_(None))
+        if not can_view_dept(user, -1, s):
+            q = q.filter(Photo.department_id.in_(dept_ids(user) or {-1}))
+        if dept:
+            q = q.filter(Photo.department_id == dept)
+        total = q.count()
+        items = q.order_by(Photo.review_flag.desc().nulls_last(), Photo.percent.asc(), Photo.id).limit(12).all()
+    return render(request, "verify.html", user, db, rounds=rounds, rnd=rnd, depts=depts, dept=dept, items=items,
+                  total=total, mine=[p.id for p in items if not may_verify(user, p)])
 
 
 def _image_response(data: bytes) -> Response:

@@ -70,6 +70,10 @@ def process_one() -> bool:
         if usage_today(db) >= int(s["ai_daily"]):
             state["paused_reason"] = "ใช้ครบเพดานต่อวันที่ตั้งไว้แล้ว คิวจะเดินต่อเมื่อขึ้นรอบโควตาใหม่"
             state["idle"] = 900.0
+            waiting = db.query(func.count(Photo.id)).filter(Photo.status == "pending").scalar()
+            if waiting:
+                notify.alert_admin(db, "ai_cap", f"AI ใช้ครบเพดาน {s['ai_daily']} ครั้งของวันนี้แล้ว มี {waiting} ภาพรอในคิว "
+                                                 "คิวจะเดินต่อเองเมื่อขึ้นรอบโควตาใหม่ หรือเพิ่มเพดานในหน้าตั้งค่าถ้าโควตาของ key ยังเหลือ", 20)
             return False
         state["paused_reason"] = ""
         t = now()
@@ -89,6 +93,10 @@ def process_one() -> bool:
             if blob is None:
                 raise ai.AIError("ภาพเต็มถูกลบไปแล้ว จึงวิเคราะห์ใหม่ไม่ได้", retryable=False)
             meta = dict(area_type=photo.area_type, area_name=photo.area_name, note=photo.note)
+            if photo.area_id:
+                from .db import AuditArea
+                area = db.get(AuditArea, photo.area_id)
+                meta["standard"] = area.standard if area is not None else ""
             result, provider, model = ai.analyze(blob.data, list(rnd.rubric or []), meta, s, on_call=count_call)
             review = False
             if int(s.get("ai_passes", 1)) >= 2 and provider != "demo" and result.get("image_ok", True):
@@ -99,6 +107,7 @@ def process_one() -> bool:
                     pass
             apply_result(photo, result, provider, model)
             photo.review_flag = review
+            photo.verified_by, photo.verified_at = "", None       # ผลใหม่ต้องให้คนยืนยันใหม่
             photo.overridden = False
             photo.override_by = photo.override_note = ""
             photo.override_at = None
@@ -122,11 +131,38 @@ def process_one() -> bool:
         if photo.status in ("done", "rejected", "error"):
             notify.emit(db, "result", round_id=photo.round_id, department_id=photo.department_id, photo_id=photo.id)
             if photo.status == "error":
-                notify.emit(db, "system", payload={"text": f"AI วิเคราะห์ภาพไม่สำเร็จ: {photo.error[:300]}\n"
-                                                           "ตรวจการตั้งค่า AI และโควตาในหน้าจัดการระบบ"},
-                            throttle_key="ai_error")
+                db.commit()
+                notify.alert_admin(db, "ai_error", f"AI วิเคราะห์ภาพไม่สำเร็จ: {photo.error[:300]} "
+                                                   "ตรวจการตั้งค่า AI และโควตาในหน้าจัดการระบบ", 1)
         db.commit()
         return True
+
+
+def housekeeping() -> dict:
+    """งานดูแลประจำ (ทุก 6 ชั่วโมงขณะระบบทำงาน): ลบภาพตามนโยบาย ตรวจพื้นที่ เตือนให้สำรอง เตือนรอบใกล้ปิด"""
+    from datetime import timedelta as _td
+    from . import scoring
+    out = {}
+    with SessionLocal() as db:
+        s = settings_store.load()
+        out["cleanup"] = storage.auto_cleanup(db, s)
+        out["alerts"] = storage.check_alerts(db, settings_store.load())
+        out["backup"] = storage.backup_reminders(db, settings_store.load())
+        today = (now() + _td(hours=7)).date()
+        out["closing"] = 0
+        for rnd in db.query(Round).filter(Round.status == "open").all():
+            if rnd.end_date is None or not 0 <= (rnd.end_date - today).days <= 2:
+                continue
+            rk = scoring.round_ranking(db, rnd, with_prev=False)
+            late = [r["dept"].name for r in rk["unranked"] + rk["idle"]]
+            if late:
+                left = (rnd.end_date - today).days
+                when = "วันนี้" if left == 0 else f"อีก {left} วัน"
+                if notify.alert_admin(db, f"closing_{rnd.id}", f"รอบ \"{rnd.name}\" จะสิ้นสุด{when} "
+                                      f"แผนกที่ภาพยังไม่ครบ: {', '.join(late[:20])}", 20):
+                    out["closing"] += 1
+        db.commit()
+    return out
 
 
 def recover_stuck():
@@ -143,15 +179,7 @@ def _loop():
         try:
             if time.time() - last_cleanup > 6 * 3600:
                 last_cleanup = time.time()
-                with SessionLocal() as db:
-                    s = settings_store.load()
-                    storage.auto_cleanup(db, s)
-                    u = storage.usage(db, s)
-                    if u["level"] != "ok":
-                        notify.emit(db, "system", payload={"text": f"พื้นที่จัดเก็บใช้ไป {u['pct']}% ของงบ "
-                                    "สำรองข้อมูลรอบเก่าแล้วลบภาพเต็มในหน้า พื้นที่และสำรองข้อมูล"},
-                                    throttle_key="storage", throttle_seconds=20 * 3600)
-                        db.commit()
+                housekeeping()
             worked = process_one()
         except Exception:
             log.exception("worker loop")

@@ -44,8 +44,8 @@ def _safe(name: str) -> str:
 
 PHOTO_FIELDS = ["area_name", "area_type", "note", "uploader_name", "sha256", "width", "height",
                 "status", "error", "provider", "model", "score", "max_score", "percent", "analysis",
-                "overridden", "override_by", "override_note", "source", "review_flag"]
-PHOTO_DATES = ["created_at", "analyzed_at", "override_at", "purged_at"]
+                "overridden", "override_by", "override_note", "source", "review_flag", "verified_by"]
+PHOTO_DATES = ["created_at", "analyzed_at", "override_at", "purged_at", "verified_at"]
 
 
 def photo_dict(p: Photo) -> dict:
@@ -114,7 +114,7 @@ def export_excel(db, rnd: Round) -> bytes:
               "คะแนน", "คะแนนเต็ม", "%"]
     for c in rubric:
         titles += [f"{c['code']} ระดับ", f"{c['code']} คะแนน"]
-    titles += ["สรุป", "เหตุผลรายเกณฑ์", "คำแนะนำ", "ปรับคะแนนโดย", "เหตุผลที่ปรับ", "โมเดล"]
+    titles += ["สรุป", "เหตุผลรายเกณฑ์", "คำแนะนำ", "ปรับคะแนนโดย", "เหตุผลที่ปรับ", "โมเดล", "ยืนยันโดย", "ยืนยันเมื่อ"]
     header(ws2, 1, titles)
     photos = (db.query(Photo).filter(Photo.round_id == rnd.id)
               .order_by(Photo.department_id, Photo.id).all())
@@ -136,7 +136,8 @@ def export_excel(db, rnd: Round) -> bytes:
         reasons = "\n".join(f"{c['name']}: {c.get('reason', '')}" for c in a.get("criteria", []) if not c.get("na"))
         recs = "\n".join(f"- {x}" for c in a.get("criteria", []) for x in c.get("recommendations", []))
         vals += [a.get("summary") or a.get("image_issue") or p.error, reasons, recs,
-                 p.override_by if p.overridden else "", p.override_note if p.overridden else "", p.model]
+                 p.override_by if p.overridden else "", p.override_note if p.overridden else "", p.model,
+                 p.verified_by or "", f_dt(p.verified_at) if p.verified_at else ""]
         for i, v in enumerate(vals, 1):
             ws2.cell(row=n, column=i, value=v).alignment = wrap
         ws2.row_dimensions[n].height = 62
@@ -152,7 +153,7 @@ def export_excel(db, rnd: Round) -> bytes:
             except Exception:
                 pass
             db.expunge(thumb)
-    widths = [16, 8, 22, 22, 18, 16, 16, 18, 9, 10, 8] + [10, 10] * len(rubric) + [40, 60, 60, 16, 30, 22]
+    widths = [16, 8, 22, 22, 18, 16, 16, 18, 9, 10, 8] + [10, 10] * len(rubric) + [40, 60, 60, 16, 30, 22, 16, 16]
     for i, w in enumerate(widths, 1):
         ws2.column_dimensions[get_column_letter(i)].width = w
     ws2.freeze_panes = "C2"
@@ -182,11 +183,12 @@ def _csv(rows: list) -> bytes:
 def ranking_csv(db, rnd: Round) -> bytes:
     rk = scoring.round_ranking(db, rnd)
     rows = [["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)", "ภาพที่ให้คะแนน", "ภาพทั้งหมด", "ต่ำสุด (%)", "สูงสุด (%)",
-             "เทียบรอบก่อน"] + [f"{c['name']} (%)" for c in rk["rubric"]] + ["สถานะ"]]
+             "เทียบรอบก่อน", "จุดตรวจบังคับ", "จุดตรวจที่ส่งแล้ว"] + [f"{c['name']} (%)" for c in rk["rubric"]] + ["สถานะ"]]
     for group, label in (("ranked", "จัดอันดับแล้ว"), ("unranked", "ภาพยังไม่ครบ"), ("idle", "ยังไม่ส่งภาพ")):
         for r in rk[group]:
             rows.append([r["rank"] or "", r["dept"].code, r["dept"].name, r["avg"], r["scored"], r["total"], r["low"],
-                         r["high"], r["delta"]] + [r["crit"].get(c["code"]) for c in rk["rubric"]] + [label])
+                         r["high"], r["delta"], r["areas_required"], r["areas_covered"]]
+                        + [r["crit"].get(c["code"]) for c in rk["rubric"]] + [label])
     return _csv([["" if v is None else v for v in row] for row in rows])
 
 
@@ -196,7 +198,8 @@ def photos_csv(db, rnd: Round, dept_id: int = 0) -> bytes:
             "คะแนนเต็ม", "%"]
     for c in rubric:
         head += [f"{c['code']} ระดับ", f"{c['code']} คะแนน", f"{c['code']} เหตุผล"]
-    head += ["สรุป", "ควรทำก่อน", "ปรับโดยกรรมการ", "เหตุผลที่ปรับ", "ควรให้กรรมการตรวจ", "ภาพหลังแก้ไขของภาพเลขที่", "โมเดล"]
+    head += ["สรุป", "ควรทำก่อน", "ปรับโดยกรรมการ", "เหตุผลที่ปรับ", "ควรให้กรรมการตรวจ", "ภาพหลังแก้ไขของภาพเลขที่", "โมเดล",
+             "เป็นจุดตรวจที่กำหนด", "ยืนยันโดย", "ยืนยันเมื่อ"]
     q = db.query(Photo).filter(Photo.round_id == rnd.id)
     if dept_id:
         q = q.filter(Photo.department_id == dept_id)
@@ -217,7 +220,8 @@ def photos_csv(db, rnd: Round, dept_id: int = 0) -> bytes:
                 row += [item.get("level"), item.get("score"), item.get("reason", "")]
         row += [a.get("summary") or a.get("image_issue") or p.error, " | ".join(a.get("top_actions") or []),
                 p.override_by if p.overridden else "", p.override_note if p.overridden else "",
-                "ใช่" if p.review_flag else "", p.after_of or "", p.model]
+                "ใช่" if p.review_flag else "", p.after_of or "", p.model,
+                "ใช่" if p.area_id else "", p.verified_by or "", f_dt(p.verified_at) if p.verified_at else ""]
         rows.append(["" if v is None else v for v in row])
     return _csv(rows)
 

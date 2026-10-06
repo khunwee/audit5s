@@ -11,6 +11,13 @@
       <option value="openai"{{ ' selected' if s[slot ~ '_type'] == 'openai' }}>แบบ OpenAI-compatible (Groq, OpenRouter, Ollama ในโรงงาน)</option>
       <option value="demo"{{ ' selected' if s[slot ~ '_type'] == 'demo' }}>โหมดทดลอง (ไม่เรียก AI จริง)</option>
     </select></label>
+  <label class="field" data-show="openai"><span>เติมที่อยู่ของผู้ให้บริการ <em>เลือกแล้วระบบกรอก Base URL ให้</em></span>
+    <select data-preset>
+      <option value="">เลือกผู้ให้บริการ หรือพิมพ์ Base URL เองด้านล่าง</option>
+      <option value="https://api.groq.com/openai/v1">Groq (ฟรี ไม่ต้องผูกบัตร)</option>
+      <option value="https://openrouter.ai/api/v1">OpenRouter (รุ่นที่ลงท้าย :free)</option>
+      <option value="http://localhost:11434/v1">Ollama บนเครื่องเดียวกับระบบ (ไม่ต้องใช้ key)</option>
+    </select></label>
   <div data-show="gemini openai">
     <label class="field"><span>Base URL <em data-show="gemini">เว้นว่างได้สำหรับ Gemini</em><em data-show="openai">เช่น https://api.groq.com/openai/v1 หรือ https://openrouter.ai/api/v1 หรือ http://localhost:11434/v1</em></span>
       <input type="url" name="{{ slot }}_base" data-f="base" value="{{ s[slot ~ '_base'] }}" maxlength="300" autocomplete="off"></label>
@@ -54,6 +61,9 @@
       <label class="field"><span>คะแนนตั้งแต่กี่ % แสดงสีเขียว</span><input type="number" name="band_good" value="{{ s.band_good }}" min="1" max="100"></label>
       <label class="field"><span>คะแนนตั้งแต่กี่ % แสดงสีเหลือง <em>ต่ำกว่านี้เป็นสีแดง</em></span><input type="number" name="band_mid" value="{{ s.band_mid }}" min="0" max="99"></label>
     </div>
+    <label class="check"><input type="checkbox" name="allow_free_area" value="1"{{ ' checked' if s.allow_free_area }}><span>ให้ส่งภาพของจุดที่ไม่อยู่ในรายการจุดตรวจได้ โดยพิมพ์ชื่อเอง <em class="muted">(ปิดไว้ = ส่งได้เฉพาะจุดตรวจที่โรงงานกำหนด สำหรับแผนกที่กำหนดจุดไว้แล้ว)</em></span></label>
+    <label class="check"><input type="checkbox" name="require_coverage" value="1"{{ ' checked' if s.require_coverage }}><span>จัดอันดับเฉพาะแผนกที่ส่งภาพครบทุกจุดตรวจบังคับ <em class="muted">(ทุกแผนกถูกวัดจากจุดที่โรงงานเลือก ไม่ใช่จุดที่แผนกเลือกเอง)</em></span></label>
+    <label class="check"><input type="checkbox" name="verify_required" value="1"{{ ' checked' if s.verify_required }}><span>นับคะแนนเฉพาะภาพที่หัวหน้าหรือกรรมการยืนยันแล้ว <em class="muted">(AI เสนอคะแนน คนเป็นผู้รับรอง ปิดไว้ = นับทันทีที่ AI ให้คะแนน และยืนยันภายหลังได้)</em></span></label>
     <label class="check"><input type="checkbox" name="after_replaces" value="1"{{ ' checked' if s.after_replaces }}><span>จุดที่ส่งภาพหลังแก้ไขแล้ว ให้นับเฉพาะภาพล่าสุด <em class="muted">(แผนกที่ลงมือแก้ไขจริงจะได้คะแนนดีขึ้นทันที ปิดไว้ = นับทุกภาพ)</em></span></label>
   </section>
 
@@ -87,6 +97,10 @@
       <label class="field"><span>ความกว้างที่ขอจากเว็บแคม (พิกเซล) <em>กล้องจะให้ค่าที่ใกล้ที่สุดที่ทำได้</em></span><input type="number" name="webcam_width" value="{{ s.webcam_width }}" min="640" max="3840" step="10"></label>
       <label class="field"><span>งบพื้นที่ (MB) <em>Neon ฟรีให้ 500 MB ต่อโปรเจกต์ ตั้ง 350 เพื่อเหลือที่ให้ระบบฐานข้อมูล</em></span><input type="number" name="storage_budget_mb" value="{{ s.storage_budget_mb }}" min="20"></label>
       <label class="field"><span>ลบภาพเต็มที่เก่ากว่ากี่วัน <em>0 = ไม่ลบตามอายุ</em></span><input type="number" name="retention_days" value="{{ s.retention_days }}" min="0" max="3650"></label>
+      <label class="field"><span>ความจุฐานข้อมูลที่ host ให้ (MB) <em>Neon ฟรี 500 ระบบเทียบขนาดจริงของฐานข้อมูลกับค่านี้แล้วแจ้งผู้ดูแล</em></span><input type="number" name="host_limit_mb" value="{{ s.host_limit_mb }}" min="20"></label>
+      <label class="field"><span>เริ่มแจ้งผู้ดูแลเมื่อใช้พื้นที่ถึงกี่ %</span><input type="number" name="storage_warn_pct" value="{{ s.storage_warn_pct }}" min="10" max="99"></label>
+      <label class="field"><span>จำนวนภาพสูงสุดต่อแผนกต่อรอบ <em>0 = ไม่จำกัด</em></span><input type="number" name="max_photos_per_dept" value="{{ s.max_photos_per_dept }}" min="0"></label>
+      <label class="field"><span>เตือนให้สำรองก่อนภาพครบอายุกี่วัน <em>0 = ไม่เตือน</em></span><input type="number" name="backup_remind_days" value="{{ s.backup_remind_days }}" min="0" max="365"></label>
     </div>
     <label class="check"><input type="checkbox" name="purge_requires_backup" value="1"{{ ' checked' if s.purge_requires_backup }}><span>ลบอัตโนมัติเฉพาะภาพที่สำรองแล้วเท่านั้น <em class="muted">(แนะนำให้เปิดไว้ ถ้าพื้นที่เต็มและยังไม่สำรอง ระบบจะหยุดรับภาพแทนการลบ)</em></span></label>
     <p class="muted">การลบอัตโนมัติลบเฉพาะไฟล์ภาพเต็ม คะแนน เหตุผล คำแนะนำ และภาพย่อของทุกภาพยังอยู่ในระบบ</p>

@@ -11,7 +11,8 @@
   <div class="empty"><h2>พื้นที่จัดเก็บเต็ม</h2><p>ระบบหยุดรับภาพชั่วคราว แจ้งผู้ดูแลระบบให้สำรองข้อมูลและลบภาพเก่า</p></div>
 {% else %}
 <div class="stack" id="capture" data-max-side="{{ [settings.img_max_side * 1.25, 2400]|min|int }}" data-webcam-width="{{ settings.webcam_width }}"
-     {% if before %}data-after="{{ before.id }}" data-area="{{ before.area_name }}" data-type="{{ before.area_type }}"{% endif %}>
+     data-defined='{{ defined|tojson }}' data-allow-free="{{ '1' if settings.allow_free_area else '0' }}"
+     {% if before %}data-after="{{ before.id }}" data-area="{{ before.area_name }}" data-type="{{ before.area_type }}" data-area-id="{{ before.area_id or '' }}"{% endif %}>
   {% if before %}
   <p class="note blue">ส่งภาพหลังแก้ไขของจุด "{{ before.area_name }}" (ภาพเลขที่ {{ before.id }}{% if before.percent is not none %}, เดิมได้ {{ before.percent|num }}%{% endif %})
     ถ่ายมุมเดียวกับภาพเดิมเพื่อให้เทียบกันได้{% if settings.after_replaces %} เมื่อภาพใหม่ได้คะแนนแล้ว ระบบจะนับภาพใหม่แทนภาพเดิม{% endif %}</p>
@@ -64,7 +65,7 @@
     <ul class="tips">
       <li>ถ่ายมุมกว้างให้เห็นพื้น ชั้นวาง และป้ายชี้บ่งในภาพเดียว</li>
       <li>เปิดไฟให้สว่าง ถือกล้องให้นิ่ง ภาพเบลอหรือมืดจะไม่ถูกนำไปคิดคะแนน</li>
-      <li>ใส่ชื่อจุดตรวจให้ตรงกับที่เรียกกันในโรงงาน เช่น ชั้นวาง Jig หน้า Line 3</li>
+      <li>เลือกจุดตรวจให้ตรงกับที่ถ่าย ถ้าพิมพ์ชื่อเอง ใช้ชื่อที่เรียกกันในโรงงาน เช่น ชั้นวาง Jig หน้า Line 3</li>
       <li>AI ไม่รู้ว่าภาพเป็นของแผนกใด และให้คะแนนจากสิ่งที่เห็นในภาพเท่านั้น</li>
     </ul>
   </section>
@@ -75,9 +76,10 @@
   <article class="q-card">
     <img alt="ภาพที่จะส่ง">
     <div>
-      <label class="field"><span>ชื่อจุดตรวจ</span><input type="text" data-k="area_name" list="areas" maxlength="160" placeholder="เช่น ชั้นวาง Jig หน้า Line 3"></label>
+      <label class="field" data-area-pick hidden><span>จุดตรวจ</span><select data-k="area_id"></select></label>
+      <label class="field" data-area-name><span>ชื่อจุดตรวจ</span><input type="text" data-k="area_name" list="areas" maxlength="160" placeholder="เช่น ชั้นวาง Jig หน้า Line 3"></label>
       <div class="grid-2">
-        <label class="field"><span>ประเภทพื้นที่</span><select data-k="area_type">{% for t in area_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
+        <label class="field" data-area-type><span>ประเภทพื้นที่</span><select data-k="area_type">{% for t in area_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
         <label class="field"><span>หมายเหตุ <em>ไม่บังคับ</em></span><input type="text" data-k="note" maxlength="300"></label>
       </div>
       <div class="q-state"><span data-state>ยังไม่ได้ส่ง</span><button type="button" class="btn small quiet" data-remove>เอาภาพนี้ออก</button></div>

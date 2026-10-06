@@ -15,6 +15,7 @@
     <option value="waiting"{{ ' selected' if status == 'waiting' }}>รอ AI วิเคราะห์</option>
     <option value="rejected"{{ ' selected' if status == 'rejected' }}>ภาพใช้ประเมินไม่ได้</option>
     <option value="error"{{ ' selected' if status == 'error' }}>วิเคราะห์ไม่สำเร็จ</option>
+    <option value="unverified"{{ ' selected' if status == 'unverified' }}>ยังไม่มีคนยืนยัน</option>
     <option value="review"{{ ' selected' if status == 'review' }}>ควรให้กรรมการตรวจ</option>
     <option value="override"{{ ' selected' if status == 'override' }}>กรรมการปรับคะแนนแล้ว</option>
   </select></label>
@@ -28,7 +29,7 @@
   <a class="photo-card" href="/photos/{{ p.id }}">
     <span class="shot"><img src="/photos/{{ p.id }}/thumb" alt="" loading="lazy">{% if p.status == 'done' %}{{ m.tag(p.percent) }}{% endif %}</span>
     <span class="cap"><b>{{ p.area_name }}</b><span class="muted">{{ p.department.name }}</span>
-      {% if p.status != 'done' or p.overridden or p.review_flag %}<span>{{ m.chip(p) }}</span>{% endif %}</span>
+      <span>{{ m.chip(p) }}</span></span>
   </a>
   {% endfor %}
 </div>

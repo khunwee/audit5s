@@ -21,9 +21,16 @@ def superseded(photos: list) -> set:
     return {p.after_of for p in photos if p.after_of and p.status == "done" and p.percent is not None}
 
 
-def dept_stats(photos: list, rubric: list, replace: bool = True) -> dict:
+def dept_stats(photos: list, rubric: list, replace: bool = True, verified_only: bool = False,
+               required: dict = None) -> dict:
+    """สถิติของแผนกในหนึ่งรอบ
+
+    verified_only  นับคะแนนเฉพาะภาพที่หัวหน้าหรือกรรมการยืนยันแล้ว
+    required       {เลขที่จุดตรวจ: ชื่อ} ของจุดตรวจบังคับของแผนก ใช้บอกว่ายังขาดจุดใด
+    """
     old = superseded(photos) if replace else set()
-    scored = [p for p in photos if p.status == "done" and p.percent is not None and p.id not in old]
+    done = [p for p in photos if p.status == "done" and p.percent is not None and p.id not in old]
+    scored = [p for p in done if p.verified_at is not None] if verified_only else done
     crit = {}
     for c in rubric:
         vals = []
@@ -33,19 +40,32 @@ def dept_stats(photos: list, rubric: list, replace: bool = True) -> dict:
                     vals.append(item["score"] / item["max"] * 100)
         crit[c["code"]] = _mean(vals)
     pcts = [p.percent for p in scored]
+    required = required or {}
+    covered = {p.area_id for p in scored if p.area_id}
+    missing = [name for aid, name in required.items() if aid not in covered]
+    unverified = sum(1 for p in done if p.verified_at is None)
     return dict(total=len(photos), scored=len(scored),
                 waiting=sum(1 for p in photos if p.status in ("pending", "processing")),
                 rejected=sum(1 for p in photos if p.status == "rejected"),
                 errors=sum(1 for p in photos if p.status == "error"),
                 overridden=sum(1 for p in scored if p.overridden), replaced=len(old),
                 review=sum(1 for p in scored if p.review_flag),
+                unverified=unverified, verified=len(done) - unverified,
+                areas_required=len(required), areas_covered=len(required) - len(missing), missing=missing,
                 avg=_mean(pcts), low=min(pcts) if pcts else None, high=max(pcts) if pcts else None,
                 crit=crit)
 
 
 def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
     from . import settings_store
-    replace = bool(settings_store.load().get("after_replaces", True))
+    from .db import AuditArea
+    cfg = settings_store.load()
+    replace = bool(cfg.get("after_replaces", True))
+    verified_only, need_cover = bool(cfg.get("verify_required")), bool(cfg.get("require_coverage"))
+    required = defaultdict(dict)
+    for a in (db.query(AuditArea).filter(AuditArea.active.is_(True), AuditArea.required.is_(True))
+              .order_by(AuditArea.sort_order, AuditArea.id).all()):
+        required[a.department_id][a.id] = a.name
     rubric = list(rnd.rubric or [])
     photos = db.query(Photo).filter(Photo.round_id == rnd.id).all()
     by = defaultdict(list)
@@ -56,8 +76,9 @@ def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
     for did, d in depts.items():
         if not d.active and did not in by:
             continue
-        st = dept_stats(by.get(did, []), rubric, replace)
-        st.update(dept=d, qualified=st["scored"] >= max(1, rnd.min_photos), rank=None, delta=None)
+        st = dept_stats(by.get(did, []), rubric, replace, verified_only, required.get(did))
+        st.update(dept=d, rank=None, delta=None,
+                  qualified=st["scored"] >= max(1, rnd.min_photos) and not (need_cover and st["missing"]))
         rows.append(st)
     ranked = sorted([r for r in rows if r["qualified"]],
                     key=lambda r: (-r["avg"], -(r["low"] or 0), r["dept"].name))
@@ -76,6 +97,8 @@ def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
                       key=lambda r: r["dept"].name)
     idle = sorted([r for r in rows if r["total"] == 0], key=lambda r: r["dept"].name)
     return dict(ranked=ranked, unranked=unranked, idle=idle, rubric=rubric, prev=prev,
+                verify_required=verified_only, require_coverage=need_cover,
+                has_areas=any(required.values()),
                 photo_count=len(photos),
                 full_score=round(sum(c["max"] for c in rubric), 2))
 

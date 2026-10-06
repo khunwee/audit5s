@@ -3,7 +3,7 @@
 {%- endmacro %}
 
 {% macro chip(p) -%}
-<span class="chip chip-{{ p.status }}">{{ STATUS[p.status] }}</span>{% if p.overridden %} <span class="chip chip-plain">ปรับโดยกรรมการ</span>{% endif %}{% if p.review_flag %} <span class="chip chip-rejected">ควรให้กรรมการตรวจ</span>{% endif %}{% if not p.has_image %} <span class="chip chip-plain">ลบภาพเต็มแล้ว</span>{% endif %}
+<span class="chip chip-{{ p.status }}">{{ STATUS[p.status] }}</span>{% if p.overridden %} <span class="chip chip-plain">ปรับโดยกรรมการ</span>{% endif %}{% if p.review_flag %} <span class="chip chip-rejected">ควรให้กรรมการตรวจ</span>{% endif %}{% if p.verified_at %} <span class="chip chip-done">ยืนยันแล้ว</span>{% endif %}{% if not p.has_image %} <span class="chip chip-plain">ลบภาพเต็มแล้ว</span>{% endif %}
 {%- endmacro %}
 
 {% macro levels(c) -%}

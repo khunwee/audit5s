@@ -434,6 +434,7 @@ def test_11_storage_full_blocks_upload_and_space_cleanup():
     big = {"n": 0}
     for seed in range(100, 104):
         upload(S["auditor"], rid, d["MT"], seed, area=f"ห้องเครื่อง {seed}")
+    drain()        # ภาพที่ยังรอ AI จะไม่ถูกลบอัตโนมัติ จึงให้วิเคราะห์เสร็จก่อน
     with dbm.SessionLocal() as s:
         # จำลองภาพขนาดใหญ่ให้เกินงบ 20 MB
         s.query(dbm.Photo).filter(dbm.Photo.has_image.is_(True)).update({"image_bytes": 6 * 1024 * 1024})

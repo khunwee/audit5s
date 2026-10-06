@@ -14,19 +14,27 @@ if not exist ".venv\Scripts\python.exe" (
   )
 )
 call ".venv\Scripts\activate.bat"
-echo [5S Vision] Checking packages...
-python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r requirements.txt
+
+rem Install packages only on the first run, or when requirements.txt has changed after an update.
+rem Later starts skip this step, so they are fast and work without internet.
+fc /b requirements.txt ".venv\requirements.installed" >nul 2>&1
 if errorlevel 1 (
-  echo Package install failed. Check the internet connection and try again.
-  pause
-  exit /b 1
+  echo [5S Vision] Installing packages. This takes 1 to 3 minutes and needs internet...
+  python -m pip install --quiet --disable-pip-version-check --no-cache-dir -r requirements.txt
+  if errorlevel 1 (
+    echo Package install failed. Check the internet connection and run this file again.
+    pause
+    exit /b 1
+  )
+  copy /y requirements.txt ".venv\requirements.installed" >nul
 )
+
 echo.
-echo [5S Vision] Running at  http://localhost:%PORT%
-echo Phones on the same Wi-Fi: open  http://THIS-PC-IP:%PORT%   (run "ipconfig" to see the IP)
-echo Close this window or run stop.bat to stop.
+echo [5S Vision] Starting. The system is ready when you see "Application startup complete".
+echo   On this PC:             http://localhost:%PORT%
+echo   Phones on same Wi-Fi:   http://THIS-PC-IP:%PORT%   - run "ipconfig" to see the IP
+echo   To stop: close this window or run stop.bat
 echo.
 start "" "http://localhost:%PORT%"
-python -m uvicorn app.main:app --host 0.0.0.0 --port %PORT%
+python -m uvicorn app.main:app --host 0.0.0.0 --port %PORT% --no-use-colors
 pause

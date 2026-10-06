@@ -2,7 +2,8 @@
   <a href="/admin" class="{{ 'on' if path == '/admin' }}">ภาพรวม</a>
   {% if can(user, 'rounds') %}<a href="/admin/rounds" class="{{ 'on' if path.startswith('/admin/rounds') }}">รอบการตรวจ</a>{% endif %}
   {% if can(user, 'criteria') %}<a href="/admin/criteria" class="{{ 'on' if path.startswith('/admin/criteria') }}">เกณฑ์การให้คะแนน</a>{% endif %}
-  {% if can(user, 'departments') %}<a href="/admin/departments" class="{{ 'on' if path.startswith('/admin/departments') }}">แผนก</a>{% endif %}
+  {% if can(user, 'departments') %}<a href="/admin/departments" class="{{ 'on' if path.startswith('/admin/departments') }}">แผนก</a>
+  <a href="/admin/areas" class="{{ 'on' if path.startswith('/admin/areas') }}">จุดตรวจ</a>{% endif %}
   {% if user.role == 'admin' %}
   <a href="/admin/users" class="{{ 'on' if path.startswith('/admin/users') }}">ผู้ใช้และสิทธิ์</a>
   <a href="/admin/settings" class="{{ 'on' if path.startswith('/admin/settings') }}">ตั้งค่าและ AI</a>

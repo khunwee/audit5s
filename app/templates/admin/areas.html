@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}จุดตรวจ{% endblock %}
+{% macro form(a, dept) %}
+<form method="post" action="/admin/areas/save">
+  {% if a %}<input type="hidden" name="id" value="{{ a.id }}">{% endif %}
+  <input type="hidden" name="department_id" value="{{ dept.id }}">
+  <div class="grid-2">
+    <label class="field"><span>ชื่อจุดตรวจ <em>ชื่อที่คนในโรงงานเรียก</em></span><input type="text" name="name" value="{{ a.name if a }}" required maxlength="160" placeholder="เช่น ชั้นวาง Jig หน้า Line 3"></label>
+    <label class="field"><span>ประเภทพื้นที่</span><select name="area_type">{% for t in area_types %}<option value="{{ t }}"{{ ' selected' if a and a.area_type == t }}>{{ t }}</option>{% endfor %}</select></label>
+  </div>
+  <label class="field"><span>มาตรฐานของจุดนี้ <em>สภาพที่ควรเป็น AI ใช้เทียบกับภาพ ไม่บังคับ</em></span>
+    <textarea name="standard" maxlength="1500" placeholder="เช่น Jig ทุกตัวอยู่ในช่องที่มีป้ายชื่อ ไม่มีของวางบนพื้นใต้ชั้น ถังดับเพลิงด้านขวาไม่ถูกบัง">{{ a.standard if a }}</textarea></label>
+  <div class="grid-2">
+    <label class="field"><span>ลำดับการแสดง</span><input type="number" name="sort_order" value="{{ a.sort_order if a else 100 }}"></label>
+    <div>
+      <label class="check"><input type="checkbox" name="required" value="1"{{ ' checked' if not a or a.required }}><span>จุดตรวจบังคับ <em class="muted">(แผนกต้องส่งภาพจุดนี้ทุกรอบ)</em></span></label>
+      {% if a %}<label class="check"><input type="checkbox" name="active" value="1"{{ ' checked' if a.active }}><span>เปิดใช้</span></label>{% else %}<input type="hidden" name="active" value="1">{% endif %}
+    </div>
+  </div>
+  <button class="btn primary">{{ 'บันทึกจุดตรวจ' if a else 'เพิ่มจุดตรวจ' }}</button>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><h1>จุดตรวจ</h1><p>โรงงานเป็นผู้กำหนดว่าแต่ละแผนกต้องถ่ายจุดใด และมาตรฐานของจุดนั้นคืออะไร</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+  <p class="note blue">เมื่อแผนกมีจุดตรวจที่กำหนดแล้ว หน้าถ่ายภาพจะให้เลือกจากรายการนี้
+    {% if s.allow_free_area %}และยังพิมพ์ชื่อจุดอื่นเองได้{% else %}เท่านั้น{% endif %}
+    {% if s.require_coverage %}แผนกต้องส่งครบทุกจุดบังคับจึงจะถูกจัดอันดับ{% else %}ตอนนี้จุดบังคับใช้ติดตามความครบถ้วน ยังไม่ใช้ตัดสิทธิ์การจัดอันดับ{% endif %}
+    {% if user.role == 'admin' %}<a href="/admin/settings">แก้ในหน้าตั้งค่า</a>{% endif %}</p>
+  {% if not depts %}<div class="empty"><h2>ยังไม่มีแผนก</h2><p>เพิ่มแผนกก่อนกำหนดจุดตรวจ</p><a class="btn primary" href="/admin/departments">เพิ่มแผนก</a></div>{% endif %}
+  {% for d in depts %}
+  {% set list = items.get(d.id, []) %}
+  <section class="panel">
+    <div class="area-head" style="margin-top:0"><h2>{{ d.name }}</h2><span class="muted">{{ list|selectattr('active')|list|length }} จุด, บังคับ {{ list|selectattr('active')|selectattr('required')|list|length }}</span></div>
+    {% for a in list %}
+    <details class="edit">
+      <summary><span><b>{{ a.name }}</b> <span class="muted">{{ a.area_type }}</span>
+        {% if not a.active %} <span class="chip chip-plain">ปิดใช้</span>{% elif a.required %} <span class="chip chip-pending">บังคับ</span>{% endif %}
+        {% if not a.standard %} <span class="chip chip-plain">ยังไม่มีมาตรฐาน</span>{% endif %}</span>
+        <span class="muted">{{ counts.get(a.id, 0) }} ภาพ</span></summary>
+      {{ form(a, d) }}
+      <form method="post" action="/admin/areas/{{ a.id }}/delete" data-confirm="ลบจุดตรวจ {{ a.name }} ถ้ามีภาพของจุดนี้ในระบบ จะถูกปิดใช้แทน" style="padding:0 4px 14px"><button class="btn small danger">ลบจุดตรวจนี้</button></form>
+    </details>
+    {% else %}<p class="muted">ยังไม่ได้กำหนดจุดตรวจ แผนกนี้ตั้งชื่อจุดเองตอนส่งภาพ</p>
+    {% endfor %}
+    <details class="edit add"><summary>เพิ่มจุดตรวจของ {{ d.name }}</summary>{{ form(none, d) }}</details>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

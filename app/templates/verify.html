@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}ยืนยันผล{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>ยืนยันผล</h1><p>ดูหลักฐานภาพเทียบกับระดับที่ AI เสนอ แล้วยืนยันหรือปรับคะแนน{% if rnd %}, เหลือ {{ total }} ภาพในรอบนี้{% endif %}</p></div>
+</div>
+{% if not rnd %}
+  <div class="empty"><h2>ยังไม่มีรอบการตรวจ</h2><p>ภาพที่รอยืนยันจะขึ้นที่หน้านี้เมื่อ AI ให้คะแนนแล้ว</p></div>
+{% else %}
+<form method="get" class="filters no-print" data-autosubmit>
+  <label class="field"><span>รอบการตรวจ</span><select name="round">{% for r in rounds %}<option value="{{ r.id }}"{{ ' selected' if r.id == rnd.id }}>{{ r.name }}</option>{% endfor %}</select></label>
+  <label class="field"><span>แผนก</span><select name="dept"><option value="0">ทุกแผนก</option>{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if d.id == dept }}>{{ d.name }}</option>{% endfor %}</select></label>
+</form>
+{% if not items %}
+  <div class="empty"><h2>ยืนยันครบแล้ว</h2><p>ไม่มีภาพที่รอยืนยันตามเงื่อนไขนี้</p><a class="btn" href="/ranking?round={{ rnd.id }}">ดูอันดับ</a></div>
+{% else %}
+<div class="stack">
+  {% for p in items %}
+  {% set a = p.analysis or {} %}
+  <article class="verify-card">
+    <a href="/photos/{{ p.id }}/image" target="_blank" rel="noopener"><img src="/photos/{{ p.id }}/image" alt="ภาพจุดตรวจ {{ p.area_name }}" loading="lazy"></a>
+    <div>
+      <div class="split"><div><h2>{{ p.area_name }}</h2><p class="muted" style="margin:0">{{ p.department.name }}, ภาพเลขที่ {{ p.id }}, ส่งโดย {{ p.uploader_name or '-' }} เมื่อ {{ p.created_at|dt }}</p></div>{{ m.tag(p.percent) }}</div>
+      {% if p.review_flag %}<p class="note" style="margin-top:8px">AI ประเมินสองรอบได้ผลต่างกันมาก ดูภาพนี้ให้ละเอียด</p>{% endif %}
+      {% if a.summary %}<p style="margin-top:8px">{{ a.summary }}</p>{% endif %}
+      <ul class="verify-rows">
+        {% for c in a.criteria or [] %}
+        <li><b>{{ c.name|short }}</b>{{ m.levels(c) }}<span class="num">{% if c.na %}-{% else %}{{ c.score|num }}/{{ c.max|num }}{% endif %}</span>{% if c.reason %}<p>{{ c.reason }}</p>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <div class="actions" style="margin-top:12px">
+        {% if p.id in mine %}<span class="muted">ภาพนี้คุณเป็นผู้ส่ง ต้องให้คนอื่นยืนยัน</span>
+        {% else %}<form method="post" action="/admin/photos/{{ p.id }}/verify" class="inline"><button class="btn primary">ตรงกับภาพ ยืนยันคะแนนนี้</button></form>{% endif %}
+        <a class="btn quiet" href="/photos/{{ p.id }}">ดูทั้งหมดหรือปรับคะแนน</a>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+  {% if total > items|length %}<p class="muted">แสดง {{ items|length }} ภาพแรกจาก {{ total }} ภาพ ยืนยันแล้วภาพถัดไปจะขึ้นมาแทน</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

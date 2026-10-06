@@ -129,6 +129,9 @@ class Photo(Base):
     camera_id = Column(Integer, nullable=True)
     after_of = Column(Integer, nullable=True)           # ภาพนี้คือภาพหลังแก้ไขของภาพเลขที่...
     review_flag = Column(Boolean, default=False)        # AI สองรอบให้ผลต่างกันมาก ควรให้กรรมการดู
+    area_id = Column(Integer, nullable=True)            # จุดตรวจที่โรงงานกำหนด (ว่าง = จุดที่พิมพ์ชื่อเอง)
+    verified_by = Column(String(120), default="")       # หัวหน้าหรือกรรมการที่ดูภาพแล้วยืนยันผล
+    verified_at = Column(DateTime, nullable=True)
     department = relationship("Department", lazy="joined")
 
     __table_args__ = (Index("ix_photos_round_sha", "round_id", "sha256"),)
@@ -155,6 +158,20 @@ class DeptSummary(Base):
     content = Column(JSON, nullable=True)
     model = Column(String(120), default="")
     created_at = Column(DateTime, default=now)
+
+
+class AuditArea(Base):
+    """จุดตรวจที่โรงงานกำหนดให้แต่ละแผนก พร้อมมาตรฐานของจุดนั้น (ส่งให้ AI ใช้ประกอบการประเมิน)"""
+    __tablename__ = "audit_areas"
+    id = Column(Integer, primary_key=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False, index=True)
+    name = Column(String(160), nullable=False)
+    area_type = Column(String(60), default="")
+    standard = Column(Text, default="")
+    required = Column(Boolean, default=True, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    department = relationship("Department", lazy="joined")
 
 
 class Channel(Base):

@@ -45,7 +45,7 @@
         <span class="rank-name">{{ r.dept.name }}</span><br>
         <span class="rank-sub">{{ r.scored }} ภาพ, ต่ำสุด {{ r.low|num }}% สูงสุด {{ r.high|num }}%
           {% if r.delta is not none %}<span class="{{ 'delta-up' if r.delta >= 0 else 'delta-down' }}">{{ 'เพิ่มขึ้น' if r.delta >= 0 else 'ลดลง' }} {{ r.delta|abs|num }} จากรอบก่อน</span>{% endif %}
-          {% if r.overridden %}, กรรมการปรับ {{ r.overridden }} ภาพ{% endif %}{% if r.replaced %}, แก้ไขแล้ว {{ r.replaced }} จุด{% endif %}</span>
+          {% if r.overridden %}, กรรมการปรับ {{ r.overridden }} ภาพ{% endif %}{% if r.replaced %}, แก้ไขแล้ว {{ r.replaced }} จุด{% endif %}{% if r.areas_required %}, จุดตรวจบังคับ {{ r.areas_covered }}/{{ r.areas_required }}{% endif %}{% if r.unverified %}, รอยืนยัน {{ r.unverified }} ภาพ{% endif %}</span>
       </span>
       <span class="rank-crit">{% for c in ranking.rubric %}<span title="{{ c.name }}">{{ c.name|short }} {{ r.crit[c.code]|num(0) }}%{{ m.bar(r.crit[c.code]) }}</span>{% endfor %}</span>
       {{ m.tag(r.avg) }}
@@ -56,11 +56,11 @@
 
   {% if ranking.unranked %}
   <section>
-    <h2 style="margin-bottom:8px">ภาพยังไม่ครบ {{ rnd.min_photos }} ภาพ</h2>
+    <h2 style="margin-bottom:8px">ยังไม่ถูกจัดอันดับ</h2>
     <div class="table-wrap"><table>
-      <tr><th>แผนก</th><th class="r">ให้คะแนนแล้ว</th><th class="r">รอวิเคราะห์</th><th class="r">ใช้ไม่ได้หรือผิดพลาด</th><th class="r">คะแนนเฉลี่ยตอนนี้</th></tr>
+      <tr><th>แผนก</th><th class="r">นับคะแนนแล้ว</th><th class="r">รอวิเคราะห์</th><th class="r">รอยืนยัน</th><th class="r">ใช้ไม่ได้หรือผิดพลาด</th><th>จุดตรวจบังคับที่ยังขาด</th><th class="r">คะแนนเฉลี่ยตอนนี้</th></tr>
       {% for r in ranking.unranked %}
-      <tr><td><a href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">{{ r.dept.name }}</a></td><td class="r">{{ r.scored }}</td><td class="r">{{ r.waiting }}</td><td class="r">{{ r.rejected + r.errors }}</td><td class="r">{{ r.avg|num }}{{ '%' if r.avg is not none }}</td></tr>
+      <tr><td><a href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">{{ r.dept.name }}</a></td><td class="r">{{ r.scored }}</td><td class="r">{{ r.waiting }}</td><td class="r">{{ r.unverified }}</td><td class="r">{{ r.rejected + r.errors }}</td><td>{{ r.missing|join(', ') if r.missing else '-' }}</td><td class="r">{{ r.avg|num }}{{ '%' if r.avg is not none }}</td></tr>
       {% endfor %}
     </table></div>
   </section>
@@ -76,6 +76,8 @@
       <li>คะแนนของแผนกคือค่าเฉลี่ยของทุกภาพที่ให้คะแนนแล้ว ส่งภาพมากจึงไม่ได้เปรียบ แต่ภาพที่คะแนนต่ำจะดึงค่าเฉลี่ยลง</li>
       <li>ถ้าคะแนนเฉลี่ยเท่ากัน แผนกที่ภาพคะแนนต่ำสุดสูงกว่าจะอยู่อันดับดีกว่า</li>
       <li>ทุกภาพในรอบเดียวกันใช้เกณฑ์ชุดเดียวกัน และ AI ไม่ทราบว่าภาพเป็นของแผนกใด</li>
+      {% if ranking.verify_required %}<li>นับคะแนนเฉพาะภาพที่หัวหน้าหรือกรรมการดูแล้วยืนยัน ภาพที่ยังรอยืนยันจะถูกนับเมื่อยืนยันเสร็จ</li>{% endif %}
+      {% if ranking.require_coverage %}<li>แผนกต้องส่งภาพครบทุกจุดตรวจบังคับที่โรงงานกำหนด จึงจะถูกจัดอันดับ</li>{% endif %}
       {% if settings.after_replaces %}<li>จุดที่ส่งภาพหลังแก้ไขแล้ว ระบบนับเฉพาะภาพล่าสุดของจุดนั้น การแก้ไขจริงจึงเห็นผลในคะแนนทันที</li>{% endif %}
     </ul>
   </section>

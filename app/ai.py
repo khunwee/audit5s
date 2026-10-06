@@ -60,6 +60,9 @@ def build_prompt(rubric: list, meta: dict, extra: str = "") -> str:
              f"- ประเภทพื้นที่: {AREA_TYPES.get(meta.get('area_type'), meta.get('area_type') or 'อื่น ๆ')[:60]}",
              f"- ชื่อจุดตรวจ: {(meta.get('area_name') or '-')[:160]}",
              f"- หมายเหตุ: {(meta.get('note') or '-')[:500]}", ""]
+    if (meta.get("standard") or "").strip():
+        lines += ["มาตรฐานของจุดตรวจนี้ที่โรงงานกำหนด (สภาพที่ควรเป็น ใช้เทียบกับสิ่งที่เห็นในภาพ)",
+                  meta["standard"].strip()[:1500], ""]
     if (extra or "").strip():
         lines += ["มาตรฐานเฉพาะของโรงงานนี้ที่ผู้ดูแลระบบกำหนด (ใช้ประกอบการเลือกระดับ)", extra.strip()[:3000], ""]
     lines.append("เกณฑ์การให้คะแนน")
@@ -254,7 +257,12 @@ def list_models(cfg: dict) -> list:
                 r = c.get(cfg["base"].rstrip("/") + "/models", headers=headers)
                 if r.status_code != 200:
                     raise _http_error(r)
-                return sorted(m.get("id", "") for m in r.json().get("data", []) if m.get("id"))
+                # ผู้ให้บริการที่บอกชนิดข้อมูลเข้า (เช่น OpenRouter) ให้เหลือเฉพาะรุ่นที่รับภาพได้ และเอารุ่นฟรีขึ้นก่อน
+                def sees_images(m: dict) -> bool:
+                    kinds = (m.get("architecture") or {}).get("input_modalities")
+                    return not isinstance(kinds, list) or "image" in kinds
+                ids = [m["id"] for m in r.json().get("data", []) if m.get("id") and sees_images(m)]
+                return sorted(ids, key=lambda i: (0 if i.endswith(":free") else 1, i))
     except httpx.HTTPError as e:
         raise AIError(f"เชื่อมต่อไม่ได้: {type(e).__name__}", retryable=True)
     return []

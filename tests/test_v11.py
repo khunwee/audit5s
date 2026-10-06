@@ -236,8 +236,9 @@ def test_01_setup_and_account_permissions():
     # สิทธิ์ปรับคะแนนใช้ได้จริง และตัวแทนทั่วไปทำไม่ได้
     data = {f"level_{c}": 4 for c in S["codes"]}
     assert mem.post(f"/admin/photos/{S['p_v1']}/override", data=dict(data, note="ขอคะแนนเต็ม")).status_code == 403
-    assert lead.post(f"/admin/photos/{S['p_v1']}/override", data=dict(data, note="ตรวจหน้างานแล้วเรียบร้อย")).status_code == 303
-    assert photo(S["p_v1"]).percent == 100.0 and photo(S["p_v1"]).overridden
+    assert lead.post(f"/admin/photos/{S['p_v1']}/override", data=dict(data, note="ภาพของตัวเอง")).status_code == 403   # ปรับภาพที่ตัวเองส่งไม่ได้
+    assert lead.post(f"/admin/photos/{S['p_v3']}/override", data=dict(data, note="ตรวจหน้างานแล้วเรียบร้อย")).status_code == 303
+    assert photo(S["p_v3"]).percent == 100.0 and photo(S["p_v3"]).overridden and photo(S["p_v3"]).verified_by == "v_lead"
 
 
 def test_02_admin_settings_take_effect():
@@ -273,7 +274,7 @@ def test_03_exports():
     r = a.get(f"/rounds/{rid}/export/ranking.csv")
     assert r.status_code == 200 and r.content[:3] == b"\xef\xbb\xbf" and "attachment" in r.headers["content-disposition"]
     rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
-    assert rows[0][:4] == ["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)"] and len(rows[0]) == 10 + len(S["codes"])
+    assert rows[0][:4] == ["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)"] and len(rows[0]) == 12 + len(S["codes"])
     ranked = [x for x in rows[1:] if x[-1] == "จัดอันดับแล้ว"]
     assert [x[0] for x in ranked] == ["1", "2", "2"] and {x[1] for x in ranked} == {"V1", "V2", "V3"}   # คะแนนเท่ากัน อันดับร่วม
     r = a.get(f"/rounds/{rid}/export/photos.csv?dept={d['V1']}")
@@ -563,6 +564,7 @@ def test_07_two_pass_consistency_check():
     assert "สองรอบได้ 4 และ 1" in a.get(f"/photos/{pid}").text and "ควรให้กรรมการดู" in a.get("/admin").text
     assert S["mem"].post(f"/admin/photos/{pid}/accept").status_code == 403
     assert a.post(f"/admin/photos/{pid}/accept").status_code == 303 and photo(pid).review_flag is False
+    assert photo(pid).verified_at is not None and photo(pid).verified_by == "ผู้ดูแลระบบ"
     save_settings(ai_passes=1)
     notify.flush(force=True)
 
@@ -642,8 +644,7 @@ def test_09_round_events_backup_and_cleanup():
     assert "เปิดรอบการตรวจ: รอบทดสอบ 1.1" in sent_to("discord.com")[0]["body"]["content"]
     # แจ้งผู้ดูแลเมื่อ AI ใช้ไม่ได้ (จำกัดไม่ให้แจ้งซ้ำถี่)
     OUT["calls"].clear()
-    save_settings(ai1_key="")
-    notify._throttle.clear()
+    save_settings(ai1_key="", _alert_ai_error="")
     for seed in (991, 992):
         upload(S["mem"], d["V1"], seed, area=f"ไม่มี key {seed}")
     drain()

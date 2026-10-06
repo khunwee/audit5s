@@ -9,6 +9,7 @@
     <h2>ขั้นตอนเริ่มใช้งาน</h2>
     <ol class="todo">
       <li>{{ 'เสร็จแล้ว: ' if n_depts }}<a href="/admin/departments">เพิ่มแผนก</a>ที่เข้าร่วมกิจกรรม 5ส</li>
+      <li>{{ 'เสร็จแล้ว: ' if n_areas }}<a href="/admin/areas">กำหนดจุดตรวจ</a>ของแต่ละแผนก พร้อมมาตรฐานของจุดนั้น</li>
       <li><a href="/admin/users">สร้างบัญชีผู้ใช้</a>ให้ตัวแทนแผนกและกรรมการ</li>
       <li><a href="/admin/criteria">ตรวจเกณฑ์การให้คะแนน</a>และคะแนนเต็มให้ตรงกับของโรงงาน</li>
       <li>{{ 'เสร็จแล้ว: ' if ai_ready }}<a href="/admin/settings">ตั้งค่า AI</a>ด้วย API key ฟรี แล้วกดทดสอบ</li>
@@ -16,6 +17,16 @@
       <li>{{ 'เสร็จแล้ว: ' if open_rounds }}<a href="/admin/rounds">สร้างรอบการตรวจ</a>แล้วแจ้งทุกแผนกให้เริ่มส่งภาพ</li>
     </ol>
   </section>
+  {% endif %}
+
+  {% if alerts %}
+  <section class="panel panel-line">
+    <h2>แจ้งเตือนถึงผู้ดูแลใน 14 วันล่าสุด</h2>
+    <ul class="alert-list">{% for x in alerts %}<li><span class="muted">{{ x.at|dt }}</span> {{ x.detail }}</li>{% endfor %}</ul>
+    {% if user.role == 'admin' and not system_channel %}<p class="note" style="margin-top:10px">เรื่องเหล่านี้ยังไม่ถูกส่งออกไปที่ใด <a href="/admin/notifications">เพิ่มช่องทางที่ติ๊ก เรื่องถึงผู้ดูแลระบบ</a> เพื่อรับทางแชตหรืออีเมล</p>{% endif %}
+  </section>
+  {% elif user.role == 'admin' and not system_channel %}
+  <p class="note">ยังไม่มีช่องทางที่รับการแจ้งเตือนของระบบ (พื้นที่ใกล้เต็ม, AI ใช้ไม่ได้, เตือนให้สำรอง) <a href="/admin/notifications">ตั้งช่องทางของผู้ดูแล</a></p>
   {% endif %}
 
   <div class="cols cols-2">
@@ -28,6 +39,7 @@
         <div><dt>ผิดพลาด</dt><dd>{{ counts.get('error', 0) }}</dd></div>
       </dl>
       <p style="margin-top:10px">เรียก AI วันนี้ {{ used_today }} จากเพดาน {{ settings.ai_daily }} ครั้ง</p>
+      {% if n_unverified and can(user, 'score') %}<p><a href="/verify">{{ n_unverified }} ภาพรอหัวหน้าหรือกรรมการยืนยันผล</a></p>{% endif %}
       {% if n_review %}<p class="note"><a href="/photos?status=review">มี {{ n_review }} ภาพที่ AI ประเมินสองรอบได้ผลต่างกันมาก</a> ควรให้กรรมการดู</p>{% endif %}
       {% if not ai_ready %}<p class="note">ยังไม่ได้ตั้งค่า AI ภาพที่ส่งเข้ามาจะรอในคิว{% if user.role == 'admin' %} <a href="/admin/settings">ตั้งค่า AI</a>{% endif %}</p>
       {% else %}<p class="muted">AI หลัก: {{ profiles[0].type }} {{ profiles[0].model }}{% if profiles|length > 1 %}, สำรอง: {{ profiles[1].type }} {{ profiles[1].model }}{% endif %}</p>{% endif %}
@@ -38,7 +50,8 @@
     <section class="panel">
       <h2>พื้นที่จัดเก็บ</h2>
       <div class="meter {{ usage.level }}" role="img" aria-label="ใช้พื้นที่ {{ usage.pct }} เปอร์เซ็นต์"><span style="width: {{ usage.pct }}%"></span></div>
-      <p style="margin-top:8px">ใช้ {{ usage.logical|mb }} จากงบ {{ usage.budget|mb }} ({{ usage.pct|num }}%), เก็บภาพเต็ม {{ usage.images }} ภาพ</p>
+      <p style="margin-top:8px">ใช้ {{ usage.logical|mb }} จากงบ {{ usage.budget|mb }} ({{ usage.pct|num }}%), เก็บภาพเต็ม {{ usage.images }} ภาพ{% if usage.host_pct is not none %}, ฐานข้อมูลบน host {{ usage.physical|mb }} จาก {{ usage.host_limit|mb }} ({{ usage.host_pct|num }}%){% endif %}</p>
+      {% if usage.host_level != 'ok' %}<p class="note red">ขนาดฐานข้อมูลใกล้ความจุของ host ลบภาพเต็มของรอบที่สำรองแล้ว จากนั้นกด คืนพื้นที่ที่ลบแล้ว</p>{% endif %}
       {% if usage.level == 'full' %}<p class="note red">พื้นที่เต็ม ระบบหยุดรับภาพใหม่ สำรองข้อมูลแล้วลบภาพเก่า</p>
       {% elif usage.level == 'warn' %}<p class="note">พื้นที่เกิน 80% ควรสำรองข้อมูลรอบเก่าแล้วลบภาพเต็ม</p>{% endif %}
       {% if can(user, 'storage') %}<a class="btn small" href="/admin/storage">สำรองข้อมูลและจัดการพื้นที่</a>{% endif %}
@@ -51,6 +64,7 @@
       <div><dt>รอบที่เปิดอยู่</dt><dd>{{ open_rounds }}</dd></div>
       <div><dt>ช่องทางแจ้งเตือน</dt><dd>{{ n_channels }}</dd></div>
       <div><dt>กล้อง IP</dt><dd>{{ n_cameras }}</dd></div>
+      <div><dt>จุดตรวจที่กำหนด</dt><dd>{{ n_areas }}</dd></div>
       <div><dt>รุ่นของระบบ</dt><dd>{{ APP_VERSION }}</dd></div>
     </dl>
   </section>

@@ -12,14 +12,19 @@
       <div><dt>งบพื้นที่</dt><dd>{{ usage.budget|mb }}</dd></div>
       <div><dt>ภาพเต็มที่เก็บ</dt><dd>{{ usage.images }} ภาพ</dd></div>
       <div><dt>ขนาดเฉลี่ยต่อภาพ</dt><dd>{{ usage.avg_image|mb }}</dd></div>
-      {% if usage.physical is not none %}<div><dt>ขนาดไฟล์ฐานข้อมูลจริง</dt><dd>{{ usage.physical|mb }}</dd></div>{% endif %}
+      {% if usage.physical is not none %}<div><dt>ขนาดฐานข้อมูลจริง</dt><dd>{{ usage.physical|mb }}{% if usage.host_pct is not none %} ({{ usage.host_pct|num }}% ของ host){% endif %}</dd></div>{% endif %}
     </dl>
     {% if usage.avg_image %}<p class="muted" style="margin-top:8px">พื้นที่ที่เหลือเก็บภาพได้อีกประมาณ {{ ((usage.budget - usage.logical) / (usage.avg_image + 20000))|int if usage.budget > usage.logical else 0 }} ภาพ</p>{% endif %}
     {% if usage.level == 'full' %}<p class="note red">พื้นที่เต็ม ระบบหยุดรับภาพใหม่ สำรองรอบเก่าแล้วลบภาพเต็มด้านล่าง</p>{% endif %}
     <p class="muted">นโยบายปัจจุบัน: {% if s.retention_days %}ลบภาพเต็มที่เก่ากว่า {{ s.retention_days }} วัน{% else %}ไม่ลบตามอายุ{% endif %},
       ลบภาพเก่าสุดเมื่อใช้พื้นที่เกิน 90%{{ ', เฉพาะภาพที่สำรองแล้ว' if s.purge_requires_backup else ', แม้ยังไม่สำรอง' }}. ระบบตรวจทุก 6 ชั่วโมง <a href="/admin/settings">แก้นโยบาย</a></p>
-    <form method="post" action="/admin/storage/cleanup" data-confirm="ลบภาพเต็มที่เข้าเงื่อนไขตามนโยบายตอนนี้เลย"><button class="btn small">ลบตามนโยบายตอนนี้</button></form>
-    {% if not is_sqlite %}<p class="muted" style="margin-top:8px">บน Postgres พื้นที่ที่ลบแล้วจะถูกนำกลับมาใช้กับภาพใหม่โดยอัตโนมัติ ขนาดไฟล์ฐานข้อมูลจริงจึงไม่ลดลงทันที แต่จะไม่โตขึ้นอีก</p>{% endif %}
+    {% if usage.host_level != 'ok' %}<p class="note red">ขนาดฐานข้อมูลจริงถึง {{ usage.host_pct|num }}% ของความจุ host ({{ usage.host_limit|mb }}) ลบภาพเต็มของรอบที่สำรองแล้ว จากนั้นกด คืนพื้นที่ที่ลบแล้ว</p>{% endif %}
+    <p class="muted">ระบบแจ้งผู้ดูแลเมื่อใช้ถึง {{ usage.warn_pct }}% และเมื่อเต็ม{% if s.max_photos_per_dept %}, จำกัด {{ s.max_photos_per_dept }} ภาพต่อแผนกต่อรอบ{% endif %}{% if s.backup_remind_days and s.retention_days %}, เตือนให้สำรองล่วงหน้า {{ s.backup_remind_days }} วันก่อนภาพครบอายุ{% endif %}</p>
+    <div class="actions">
+      <form method="post" action="/admin/storage/cleanup" class="inline" data-confirm="ลบภาพเต็มที่เข้าเงื่อนไขตามนโยบายตอนนี้เลย"><button class="btn small">ลบตามนโยบายตอนนี้</button></form>
+      <form method="post" action="/admin/storage/compact" class="inline" data-confirm="คืนพื้นที่ที่ลบแล้วให้ฐานข้อมูล ระหว่างทำ (ไม่กี่วินาทีถึงหนึ่งนาที) การเปิดภาพจะรอ ควรทำนอกเวลาที่มีคนส่งภาพ"><button class="btn small">คืนพื้นที่ที่ลบแล้ว</button></form>
+    </div>
+    {% if not is_sqlite %}<p class="muted" style="margin-top:8px">บน Postgres พื้นที่ที่ลบแล้วถูกนำกลับมาใช้กับภาพใหม่เอง ขนาดฐานข้อมูลจริงจึงไม่ลดลงจนกว่าจะกด คืนพื้นที่ที่ลบแล้ว</p>{% endif %}
   </section>
 
   <section>

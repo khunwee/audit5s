@@ -23,6 +23,7 @@
     <a href="/capture" class="{{ 'on' if path.startswith('/capture') }}">ถ่ายภาพส่งตรวจ</a>
     <a href="/photos" class="{{ 'on' if path.startswith('/photos') }}">ภาพและผลคะแนน</a>
     <a href="/ranking" class="{{ 'on' if path.startswith('/ranking') or path.startswith('/rounds') or path.startswith('/trend') }}">อันดับ</a>
+    {% if can(user, 'score') %}<a href="/verify" class="{{ 'on' if path.startswith('/verify') }}">ยืนยันผล</a>{% endif %}
     {% if manages(user) %}<a href="/admin" class="{{ 'on' if path.startswith('/admin') }}">จัดการระบบ{% if storage_level in ('warn', 'full') %} (พื้นที่ใกล้เต็ม){% endif %}</a>{% endif %}
   </nav>
   <details class="who">

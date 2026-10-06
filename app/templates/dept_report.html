@@ -16,13 +16,16 @@
       {{ m.tag(row.avg if row else none, true) }}
       <dl class="facts">
         {% if show_rank %}<div><dt>อันดับ</dt><dd>{{ row.rank if row and row.rank else 'ยังไม่จัด' }}</dd></div>{% endif %}
-        <div><dt>ภาพที่ให้คะแนนแล้ว</dt><dd>{{ row.scored if row else 0 }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        <div><dt>ภาพที่นับคะแนน</dt><dd>{{ row.scored if row else 0 }} / ขั้นต่ำ {{ rnd.min_photos }}</dd></div>
+        {% if row and row.areas_required %}<div><dt>จุดตรวจบังคับ</dt><dd>{{ row.areas_covered }} / {{ row.areas_required }}</dd></div>{% endif %}
+        {% if row and (row.verified or row.unverified) %}<div><dt>ยืนยันผลแล้ว</dt><dd>{{ row.verified }} / {{ row.verified + row.unverified }}</dd></div>{% endif %}
         {% if row and row.low is not none %}<div><dt>ภาพต่ำสุด</dt><dd>{{ row.low|num }}%</dd></div><div><dt>ภาพสูงสุด</dt><dd>{{ row.high|num }}%</dd></div>{% endif %}
         {% if row and row.delta is not none %}<div><dt>เทียบรอบก่อน</dt><dd class="{{ 'delta-up' if row.delta >= 0 else 'delta-down' }}">{{ '+' if row.delta >= 0 }}{{ row.delta|num }}</dd></div>{% endif %}
       </dl>
     </div>
   </section>
 
+  {% if row and row.missing %}<p class="note">จุดตรวจบังคับที่ยังไม่มีภาพที่นับคะแนน: {{ row.missing|join(', ') }}</p>{% endif %}
   {% if row and row.scored %}
   <div class="cols cols-2">
     <section class="panel">

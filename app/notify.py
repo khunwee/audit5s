@@ -26,7 +26,7 @@ EVENTS = {
     "result": "ผลวิเคราะห์จาก AI (คะแนนและสิ่งที่ควรทำก่อน)",
     "problem": "เฉพาะภาพที่ใช้ไม่ได้หรือวิเคราะห์ไม่สำเร็จ",
     "round": "เปิดและปิดรอบการตรวจ",
-    "system": "พื้นที่จัดเก็บใกล้เต็ม และปัญหาการเชื่อมต่อ AI",
+    "system": "เรื่องถึงผู้ดูแลระบบ (พื้นที่ การสำรอง ปัญหา AI รอบใกล้สิ้นสุด)",
 }
 
 # (ชื่อช่อง, ป้าย, เป็นความลับ, คำอธิบาย)
@@ -264,6 +264,28 @@ def emit(db, kind: str, round_id=None, department_id=None, photo_id=None, payloa
                        payload=payload or {}))
     _dirty = True
     _wake.set()
+
+
+def alert_admin(db, key: str, text: str, hours: float = 20) -> bool:
+    """แจ้งผู้ดูแลระบบ: บันทึกไว้ให้เห็นในหน้าจัดการระบบเสมอ และส่งไปยังช่องทางที่รับเรื่องของระบบ
+
+    เวลาที่แจ้งครั้งล่าสุดเก็บในฐานข้อมูล host ฟรีที่หลับและตื่นวันละหลายรอบจึงไม่แจ้งเรื่องเดิมซ้ำ
+    """
+    from datetime import datetime
+    from .db import AuditLog
+    stamp = f"_alert_{key}"
+    last = settings_store.load().get(stamp)
+    t = now()
+    if hours > 0 and last:
+        try:
+            if (t - datetime.fromisoformat(last)).total_seconds() < hours * 3600:
+                return False
+        except ValueError:
+            pass
+    db.add(AuditLog(username="system", action="alert", detail=text[:2000]))
+    emit(db, "system", payload={"text": text})
+    settings_store.save(db, {stamp: t.isoformat()})          # commit ทั้งบันทึกและคิวแจ้งเตือน
+    return True
 
 
 def _ready(db, kind, round_id, dept_id, events, t) -> bool:
