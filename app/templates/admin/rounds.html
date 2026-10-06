@@ -18,12 +18,29 @@
           <option value="checklist"{{ ' selected' if settings.scoring_mode == 'checklist' }}>รายการตรวจ: AI ตรวจทีละข้อ ระบบคิดคะแนนตามกติกา</option>
           <option value="level"{{ ' selected' if settings.scoring_mode != 'checklist' }}>ระดับ 0 ถึง 4: AI เลือกระดับของแต่ละหมวด</option>
         </select></label>
+      <label class="check"><input type="checkbox" name="auto_open" value="1"><span>เปิดรอบเองเมื่อถึงวันเริ่ม <em class="muted">(ใช้เมื่อวันเริ่มอยู่ในอนาคต รอบจะรอเปิดตามกำหนด)</em></span></label>
+      <label class="check"><input type="checkbox" name="auto_close" value="1"><span>ปิดรอบเองเมื่อพ้นวันสิ้นสุด <em class="muted">(ต้องใส่วันสิ้นสุด ภาพของวันสิ้นสุดยังถูกนับ)</em></span></label>
       <label class="field"><span>หมายเหตุ <em>ไม่บังคับ</em></span><textarea name="note" maxlength="1000"></textarea></label>
       <p class="muted">รอบใหม่จะใช้เกณฑ์ชุดปัจจุบัน {{ n_criteria }} ข้อ <a href="/admin/criteria">ดูเกณฑ์</a></p>
       <button class="btn primary">สร้างรอบการตรวจ</button>
     </form>
   </details>
 </section>
+
+<form method="post" action="/admin/rounds/auto" class="panel" style="margin-top:14px">
+  <h2>รอบอัตโนมัติ</h2>
+  <p class="muted">เมื่อรอบล่าสุดพ้นวันสิ้นสุดและไม่มีรอบที่เปิดหรือรอเปิดอยู่ ระบบสร้างรอบถัดไปให้เอง ต่อจากวันสิ้นสุดของรอบก่อน ใช้วิธีให้คะแนนและจำนวนภาพขั้นต่ำเดิม กับเกณฑ์ชุดปัจจุบัน และปิดเองเมื่อครบช่วง</p>
+  <div class="grid-2">
+    <label class="field"><span>สร้างรอบถัดไป</span>
+      <select name="rounds_repeat">
+        <option value="off"{{ ' selected' if settings.rounds_repeat == 'off' }}>ไม่สร้างเอง</option>
+        <option value="weekly"{{ ' selected' if settings.rounds_repeat == 'weekly' }}>ทุกสัปดาห์ (รอบละ 7 วัน)</option>
+        <option value="monthly"{{ ' selected' if settings.rounds_repeat == 'monthly' }}>ทุกเดือน</option>
+      </select></label>
+    <label class="field"><span>คำขึ้นต้นของชื่อรอบ</span><input type="text" name="prefix" value="{{ settings.rounds_repeat_prefix }}" maxlength="60"></label>
+  </div>
+  <button class="btn small primary">บันทึกรอบอัตโนมัติ</button>
+</form>
 
 {% if not rounds %}
   <div class="empty" style="margin-top:16px"><h2>ยังไม่มีรอบการตรวจ</h2><p>สร้างรอบแรกจากแบบฟอร์มด้านบน</p></div>
@@ -34,8 +51,8 @@
   <div class="split">
     <div><h2>{{ r.name }}</h2>
       <p class="muted" style="margin:2px 0 0">{{ 'โหมดรายการตรวจ' if r.mode == 'checklist' else 'โหมดระดับ 0 ถึง 4' }}, เกณฑ์ฉบับที่ {{ r.rule_rev or 0 }}, {{ r.start_date|d }} ถึง {{ r.end_date|d }}, ขั้นต่ำ {{ r.min_photos }} ภาพต่อแผนก, {{ st.photos }} ภาพ (เก็บภาพเต็ม {{ st.images }} ภาพ)
-        {% if r.last_backup_at %}, สำรองล่าสุด {{ r.last_backup_at|dt }}{% else %}, ยังไม่เคยสำรอง{% endif %}</p></div>
-    <span class="chip {{ 'chip-done' if r.status == 'open' else 'chip-plain' }}">{{ 'เปิดรับภาพ' if r.status == 'open' else 'ปิดรอบแล้ว' }}</span>
+        {% if r.last_backup_at %}, สำรองล่าสุด {{ r.last_backup_at|dt }}{% else %}, ยังไม่เคยสำรอง{% endif %}{% if r.auto_close and r.status != 'closed' %}, ปิดเองหลังวันที่ {{ r.end_date|d }}{% endif %}</p></div>
+    <span class="chip {{ 'chip-done' if r.status == 'open' else 'chip-pending' if r.status == 'planned' else 'chip-plain' }}">{{ 'เปิดรับภาพ' if r.status == 'open' else 'รอเปิดวันที่ ' ~ (r.start_date|d) if r.status == 'planned' else 'ปิดรอบแล้ว' }}</span>
   </div>
   <div class="actions" style="margin-top:12px">
     <a class="btn small" href="/ranking?round={{ r.id }}">ดูอันดับ</a>
@@ -44,6 +61,8 @@
     {% if can(user, 'storage') %}<a class="btn small" href="/admin/rounds/{{ r.id }}/backup.zip">สำรองรอบนี้ (ZIP)</a>{% endif %}
     {% if r.status == 'open' %}
       <form method="post" action="/admin/rounds/{{ r.id }}/close" class="inline" data-confirm="ปิดรอบนี้ ระบบจะไม่รับภาพเพิ่ม (เปิดใหม่ได้ภายหลัง)"><button class="btn small">ปิดรอบ</button></form>
+    {% elif r.status == 'planned' %}
+      <form method="post" action="/admin/rounds/{{ r.id }}/reopen" class="inline" data-confirm="เปิดรอบนี้ตอนนี้เลย โดยไม่รอวันเริ่ม"><button class="btn small">เปิดรอบตอนนี้</button></form>
     {% else %}
       <form method="post" action="/admin/rounds/{{ r.id }}/reopen" class="inline"><button class="btn small">เปิดรอบอีกครั้ง</button></form>
     {% endif %}
@@ -58,6 +77,8 @@
         <label class="field"><span>วันสิ้นสุด</span><input type="date" name="end_date" value="{{ r.end_date or '' }}"></label>
       </div>
       <label class="field"><span>จำนวนภาพขั้นต่ำต่อแผนก</span><input type="number" name="min_photos" value="{{ r.min_photos }}" min="1" max="200"></label>
+      <label class="check"><input type="checkbox" name="auto_open" value="1"{{ ' checked' if r.auto_open }}><span>เปิดรอบเองเมื่อถึงวันเริ่ม</span></label>
+      <label class="check"><input type="checkbox" name="auto_close" value="1"{{ ' checked' if r.auto_close }}><span>ปิดรอบเองเมื่อพ้นวันสิ้นสุด</span></label>
       <label class="field"><span>หมายเหตุ</span><textarea name="note" maxlength="1000">{{ r.note }}</textarea></label>
       <button class="btn primary">บันทึกการแก้ไข</button>
     </form>

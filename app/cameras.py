@@ -97,6 +97,7 @@ def grab(cam: Camera) -> bytes:
 
 # --------------------------------------------------------------------------- agent (อยู่ในหน่วยความจำ ไม่แตะฐานข้อมูล)
 agent = {"seen": 0.0, "requests": {}, "cache": None, "last_error": ""}
+direct = {"cache": None}     # กล้องแบบ direct ที่มีตารางเวลา สำหรับตัวตั้งเวลาเบื้องหลัง
 
 
 def agent_online() -> bool:
@@ -109,3 +110,4 @@ def token_ok(given: str, real: str) -> bool:
 
 def invalidate():
     agent["cache"] = None
+    direct["cache"] = None

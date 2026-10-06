@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, notify, routes_admin, routes_main, routes_tv, settings_store, worker
+from . import config, notify, routes_admin, routes_main, routes_tv, scheduler, settings_store, worker
 from .db import SessionLocal, User, init_db
 from .security import NeedLogin, NeedPasswordChange
 from .web import render
@@ -24,9 +24,11 @@ async def lifespan(_app):
     if not config.DISABLE_WORKER:
         worker.start()
         notify.start()
+        scheduler.start()
     yield
     worker.stop()
     notify.stop()
+    scheduler.stop()
 
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION, docs_url=None, redoc_url=None,

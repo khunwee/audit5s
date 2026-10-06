@@ -54,6 +54,7 @@ class Department(Base):
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=now)
     name_en = Column(String(120), default="")           # ชื่อภาษาอังกฤษ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ
+    cam_schedule = Column(JSON, nullable=True)          # ตารางเวลาถ่ายอัตโนมัติของกล้องในแผนกนี้ (ว่าง = ใช้ค่ากลาง)
 
 
 
@@ -144,7 +145,9 @@ class Round(Base):
     note = Column(Text, default="")
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
-    status = Column(String(12), default="open", nullable=False)   # open | closed
+    status = Column(String(12), default="open", nullable=False)   # planned (รอเปิดตามวันเริ่ม) | open | closed
+    auto_open = Column(Boolean, default=False)       # เปิดรอบเองเมื่อถึงวันเริ่ม
+    auto_close = Column(Boolean, default=False)      # ปิดรอบเองเมื่อพ้นวันสิ้นสุด
     min_photos = Column(Integer, default=3, nullable=False)
     rubric = Column(JSON, default=list)
     created_at = Column(DateTime, default=now)
@@ -293,6 +296,8 @@ class Camera(Base):
     active = Column(Boolean, default=True, nullable=False)
     last_capture_at = Column(DateTime, nullable=True)
     last_error = Column(Text, default="")
+    sched_mode = Column(String(10), default="inherit")   # inherit = ใช้ตารางของแผนกหรือค่ากลาง | own = ตารางของกล้องนี้ | off = ไม่ถ่ายอัตโนมัติ
+    schedule = Column(JSON, nullable=True)               # ตารางเวลาของกล้องนี้ (เมื่อ sched_mode = own)
     department = relationship("Department", lazy="joined")
 
 

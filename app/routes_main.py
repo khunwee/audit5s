@@ -4,7 +4,8 @@ import time
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import (actions as act_mod, ai, backup, cameras, config, notify, photos as intake, rules, scoring, security,
+from . import (actions as act_mod, ai, backup, cameras, config, notify, photos as intake, rounds_auto, rules, schedule,
+               scheduler, scoring, security,
                settings_store, storage, worker)
 from .db import (Action, AuditArea, Camera, Department, DeptSummary, Photo, PhotoImage, PhotoThumb, Round, User, get_db,
                  log, now)
@@ -17,11 +18,13 @@ PAGE = 24
 
 # --------------------------------------------------------------------------- ตัวช่วย
 def active_round(db):
+    rounds_auto.ensure(db)          # เปิดหรือปิดรอบตามวันที่ก่อนตอบ (ทำงานจริงเฉพาะเมื่อขึ้นวันใหม่หรือข้อมูลเปลี่ยน)
     return (db.query(Round).filter(Round.status == "open").order_by(Round.id.desc()).first()
-            or db.query(Round).order_by(Round.id.desc()).first())
+            or db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).first())
 
 
 def open_round(db):
+    rounds_auto.ensure(db)
     return db.query(Round).filter(Round.status == "open").order_by(Round.id.desc()).first()
 
 
@@ -235,29 +238,35 @@ def camera_capture(cid: int, round_id: int = Form(...), user=Depends(need("camer
         cameras.agent["requests"][cam.id] = dict(by=user.full_name or user.username, at=time.time())
         return {"queued": True, "message": "ส่งคำสั่งถ่ายไปยังเครื่องในโรงงานแล้ว ภาพจะเข้าระบบภายในไม่กี่วินาที"}
     try:
-        raw = cameras.grab(cam)
+        p = scheduler.capture_direct(db, cam, rnd, f"กล้อง {cam.name}", user.id, user.full_name or user.username)
     except cameras.CameraError as e:
-        cam.last_error = str(e)[:500]
-        db.commit()
         raise HTTPException(502, str(e))
-    p = intake.create_photo(db, settings_store.load(), rnd=rnd, department_id=cam.department_id, raw=raw,
-                            area_name=cam.area_name or cam.name, area_type=cam.area_type, note=f"กล้อง {cam.name}",
-                            uploader_id=user.id, uploader_name=user.full_name or user.username, source="ipcam",
-                            camera_id=cam.id)
-    cam.last_capture_at, cam.last_error = now(), ""
-    db.commit()
     return {"id": p.id, "status": p.status, "area": p.area_name}
 
 
 def _agent_cache(db) -> dict:
     """รายการกล้องสำหรับ agent เก็บในหน่วยความจำ: agent ถามบ่อย จึงไม่ให้ทุกครั้งไปปลุกฐานข้อมูล"""
     if cameras.agent["cache"] is None:
-        cams = db.query(Camera).filter(Camera.active.is_(True), Camera.mode == "agent").order_by(Camera.id).all()
+        if not settings_store.load().get("_sched_secret"):
+            import secrets as _secrets
+            settings_store.save(db, {"_sched_secret": _secrets.token_hex(16)})
+        eff = scheduler.effective_map(db)
+        cams = [c for c, _, _ in eff.values() if c.mode == "agent"]
         cameras.agent["cache"] = dict(
             cameras=[dict(id=c.id, name=c.name, source=c.source, url=c.url, username=c.username,
-                          password=c.password, auth=c.auth) for c in cams],
+                          password=c.password, auth=c.auth, department=c.department.name, area=c.area_name or c.name)
+                     for c in cams],
+            schedules={c.id: eff[c.id][1] for c in cams},
             open_round=open_round(db) is not None)
     return cameras.agent["cache"]
+
+
+def _agent_plan(data: dict) -> dict:
+    """เวลาถ่ายของวันนี้ของแต่ละกล้อง คำนวณจากตารางที่เก็บในหน่วยความจำ ไม่แตะฐานข้อมูล"""
+    when = schedule.thai_now()
+    return dict(date=when.date().isoformat(), now=when.strftime("%H:%M"),
+                grace=int(settings_store.load().get("cam_grace_min", 20) or 20),
+                plan={str(cid): schedule.times_for(cid, sched, when.date()) for cid, sched in data["schedules"].items()})
 
 
 def _agent_auth(token: str):
@@ -271,12 +280,12 @@ def agent_poll(x_agent_token: str = Header(""), db=Depends(get_db)):
     _agent_auth(x_agent_token)
     data = _agent_cache(db)
     requests = list(cameras.agent["requests"].keys())
-    return dict(data, requests=requests)
+    return dict(cameras=data["cameras"], open_round=data["open_round"], requests=requests, **_agent_plan(data))
 
 
 @router.post("/api/agent/upload")
 def agent_upload(file: UploadFile = File(None), camera_id: int = Form(...), error: str = Form(""),
-                 x_agent_token: str = Header(""), db=Depends(get_db)):
+                 scheduled: str = Form(""), x_agent_token: str = Header(""), db=Depends(get_db)):
     _agent_auth(x_agent_token)
     cam = db.get(Camera, camera_id)
     if cam is None or not cam.active or cam.mode != "agent":
@@ -285,6 +294,8 @@ def agent_upload(file: UploadFile = File(None), camera_id: int = Form(...), erro
     if error or file is None:
         cam.last_error = (error or "agent ไม่ได้ส่งภาพ")[:500]
         db.commit()
+        if not req:
+            scheduler.camera_failed(db, cam, cam.last_error)
         return {"ok": False}
     rnd = open_round(db)
     if rnd is None:
@@ -292,7 +303,7 @@ def agent_upload(file: UploadFile = File(None), camera_id: int = Form(...), erro
     raw = file.file.read(config.MAX_UPLOAD_BYTES + 1)
     p = intake.create_photo(db, settings_store.load(), rnd=rnd, department_id=cam.department_id, raw=raw,
                             area_name=cam.area_name or cam.name, area_type=cam.area_type,
-                            note=f"กล้อง {cam.name}" + (f" สั่งถ่ายโดย {req['by']}" if req else " ถ่ายตามเวลาที่ตั้งไว้"),
+                            note=f"กล้อง {cam.name}" + (f" สั่งถ่ายโดย {req['by']}" if req else f" ถ่ายตามตาราง {scheduled[:5]}" if scheduled else " ถ่ายตามเวลาที่ตั้งไว้"),
                             uploader_name=f"กล้อง {cam.name}", source="agent", camera_id=cam.id)
     cam.last_capture_at, cam.last_error = now(), ""
     db.commit()
@@ -304,7 +315,7 @@ def agent_upload(file: UploadFile = File(None), camera_id: int = Form(...), erro
 def photos(request: Request, round: int = 0, dept: int = 0, status: str = "", page: int = 1,
            user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
-    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rounds = db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).all()
     rnd = db.get(Round, round) if round else active_round(db)
     depts = db.query(Department).order_by(Department.name).all()
     mine = dept_ids(user)
@@ -454,7 +465,7 @@ def actions_export(dept: int = 0, user=Depends(need("export")), db=Depends(get_d
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page(request: Request, round: int = 0, user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
-    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rounds = db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).all()
     rnd = db.get(Round, round) if round else active_round(db)
     data, allowed = None, False
     if rnd:
@@ -473,7 +484,7 @@ def may_verify(user: User, p: Photo) -> bool:
 def verify_queue(request: Request, round: int = 0, dept: int = 0, user=Depends(need("score")), db=Depends(get_db)):
     """คิวยืนยันผล: ภาพที่ AI ให้คะแนนแล้วแต่ยังไม่มีคนดู เรียงภาพที่ AI ไม่นิ่งและคะแนนต่ำขึ้นก่อน"""
     s = settings_store.load()
-    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rounds = db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).all()
     rnd = db.get(Round, round) if round else active_round(db)
     depts = db.query(Department).order_by(Department.name).all()
     if not can_view_dept(user, -1, s):
@@ -535,7 +546,7 @@ def photo_delete(pid: int, request: Request, user=Depends(current_user), db=Depe
 @router.get("/ranking", response_class=HTMLResponse)
 def ranking_page(request: Request, round: int = 0, user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
-    rounds = db.query(Round).order_by(Round.id.desc()).all()
+    rounds = db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).all()
     rnd = db.get(Round, round) if round else active_round(db)
     ranking, allowed = None, False
     if rnd:
@@ -638,7 +649,7 @@ def dataset_export(rid: int, user=Depends(need("export")), db=Depends(get_db)):
 
 
 def trend_data(db, limit: int = 8) -> dict:
-    rounds = list(reversed(db.query(Round).order_by(Round.id.desc()).limit(limit).all()))
+    rounds = list(reversed(db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).limit(limit).all()))
     table, depts = {}, {}
     for r in rounds:
         rk = scoring.round_ranking(db, r, with_prev=False)

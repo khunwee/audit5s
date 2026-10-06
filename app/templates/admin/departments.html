@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}แผนก{% endblock %}
+{% import "admin/_sched.html" as sc %}
 {% macro form(d) %}
 <form method="post" action="/admin/departments/save">
   {% if d %}<input type="hidden" name="id" value="{{ d.id }}">{% endif %}
@@ -10,6 +11,15 @@
   <label class="field"><span>ชื่อภาษาอังกฤษ <em>ไม่บังคับ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ</em></span><input type="text" name="name_en" value="{{ d.name_en if d and d.name_en }}" maxlength="120" placeholder="เช่น Production 1"></label>
   <label class="field"><span>อาคารหรือโซน <em>ไม่บังคับ</em></span><input type="text" name="zone" value="{{ d.zone if d }}" maxlength="120"></label>
   {% if d %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if d.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not d.active }}>ปิดการใช้งาน</option></select></label>{% endif %}
+  <fieldset class="perm-box"><legend>ตารางเวลาถ่ายอัตโนมัติของกล้องในแผนกนี้</legend>
+    <label class="field"><span>กล้อง IP ของแผนกนี้ใช้ตาราง</span>
+      <select name="cam_sched_mode">
+        <option value="inherit"{{ ' selected' if not d or not d.cam_schedule }}>ค่ากลางของระบบ</option>
+        <option value="own"{{ ' selected' if d and d.cam_schedule }}>ของแผนกนี้เอง (กรอกด้านล่าง)</option>
+      </select></label>
+    {{ sc.fields(d.cam_schedule if d and d.cam_schedule else none, day_names) }}
+    <p class="muted" style="margin:0">กล้องที่ตั้งตารางของตัวเองไว้จะใช้ตารางของกล้อง ลงทะเบียนกล้องที่หน้า กล้อง</p>
+  </fieldset>
   <button class="btn primary">{{ 'บันทึกแผนก' if d else 'เพิ่มแผนก' }}</button>
 </form>
 {% endmacro %}

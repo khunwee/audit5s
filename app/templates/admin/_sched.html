@@ -1,0 +1,10 @@
+{# ช่องตั้งตารางเวลาถ่ายอัตโนมัติ ใช้ร่วมกันในหน้า กล้อง และ แผนก (ชื่อช่องขึ้นต้นด้วย sched_) #}
+{% macro fields(sched, day_names) %}
+<div class="grid-2">
+  <label class="field"><span>เวลาถ่ายคงที่ <em>คั่นด้วยจุลภาค เว้นว่าง = ไม่มี</em></span><input type="text" name="sched_times" value="{{ (sched.times if sched else [])|join(', ') }}" placeholder="เช่น 09:30, 14:30" maxlength="200"></label>
+  <label class="field"><span>สุ่มเวลาเพิ่มวันละกี่ครั้ง <em>แผนกเตรียมพื้นที่ล่วงหน้าไม่ได้</em></span><input type="number" name="sched_random" value="{{ sched.random if sched else 0 }}" min="0" max="24"></label>
+  <label class="field"><span>ช่วงเวลาที่ใช้สุ่ม</span><input type="text" name="sched_between" value="{{ sched.between if sched else '08:30-16:30' }}" placeholder="08:30-16:30" maxlength="11"></label>
+  <div class="field"><span>วันที่ถ่าย</span>
+    <span class="perm-depts">{% for d in day_names %}<label><input type="checkbox" name="sched_days" value="{{ loop.index0 }}"{{ ' checked' if (sched and loop.index0 in sched.days) or (not sched and loop.index0 < 5) }}> {{ d }}</label>{% endfor %}</span></div>
+</div>
+{% endmacro %}

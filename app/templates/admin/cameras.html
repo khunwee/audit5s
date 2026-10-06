@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}กล้อง{% endblock %}
+{% import "admin/_sched.html" as sc %}
 {% macro form(c) %}
 <form method="post" action="/admin/cameras/save" autocomplete="off">
   {% if c %}<input type="hidden" name="id" value="{{ c.id }}">{% endif %}
@@ -27,6 +28,16 @@
     <label class="field"><span>วิธียืนยันตัวตน (ลิงก์ HTTP)</span><select name="auth"><option value="basic"{{ ' selected' if not c or c.auth == 'basic' }}>Basic</option><option value="digest"{{ ' selected' if c and c.auth == 'digest' }}>Digest (กล้องรุ่นใหม่ส่วนใหญ่)</option></select></label>
     {% if c %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if c.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not c.active }}>ปิดใช้</option></select></label>{% endif %}
   </div>
+  <fieldset class="perm-box"><legend>ตารางเวลาถ่ายอัตโนมัติของกล้องนี้</legend>
+    <label class="field"><span>ใช้ตารางของ</span>
+      <select name="sched_mode">
+        <option value="inherit"{{ ' selected' if not c or (c.sched_mode or 'inherit') == 'inherit' }}>แผนก ถ้าแผนกไม่ได้ตั้ง ใช้ค่ากลาง</option>
+        <option value="own"{{ ' selected' if c and c.sched_mode == 'own' }}>กล้องนี้เอง (กรอกด้านล่าง)</option>
+        <option value="off"{{ ' selected' if c and c.sched_mode == 'off' }}>ไม่ถ่ายอัตโนมัติ ถ่ายเมื่อมีคนสั่งเท่านั้น</option>
+      </select></label>
+    {{ sc.fields(c.schedule if c and c.schedule else none, day_names) }}
+    <p class="muted" style="margin:0">ช่องเวลาด้านบนมีผลเมื่อเลือก กล้องนี้เอง เวลาเป็นเวลาประเทศไทย</p>
+  </fieldset>
   <button class="btn primary">{{ 'บันทึกกล้อง' if c else 'เพิ่มกล้อง' }}</button>
 </form>
 {% endmacro %}
@@ -46,10 +57,14 @@
   <section class="panel">
     <h2>กล้อง IP ที่ลงทะเบียน</h2>
     {% if not depts %}<p class="note">ยังไม่มีแผนก <a href="/admin/departments">เพิ่มแผนก</a>ก่อนลงทะเบียนกล้อง</p>{% else %}
-    {% for c in items %}
+    <p class="muted">กล้องที่เปิดใช้ {{ items|selectattr('active')|list|length }} ตัว, ถ่ายอัตโนมัติตามตาราง {{ n_scheduled }} ตัว แต่ละแผนกมีกล้องได้หลายตัว และกล้องแต่ละตัวผูกกับจุดตรวจของตัวเอง</p>
+    {% for d in depts %}{% set cams = by_dept.get(d.id, []) %}{% if cams %}
+    <div class="area-head"><h3>{{ d.name }}</h3><span class="muted">{{ cams|length }} กล้อง{% if d.cam_schedule %}, ตารางของแผนก: {{ describe(d.cam_schedule) }}{% endif %}</span></div>
+    {% for c in cams %}
     <details class="edit">
-      <summary><span><b>{{ c.name }}</b> <span class="muted">{{ c.department.name }}, {{ c.area_name }}, {{ 'ผ่านเครื่องในโรงงาน' if c.mode == 'agent' else 'เซิร์ฟเวอร์ดึงเอง' }}</span>
-        {% if not c.active %} <span class="chip chip-plain">ปิดใช้</span>{% elif c.last_error %} <span class="chip chip-error">ถ่ายครั้งล่าสุดไม่สำเร็จ</span>{% endif %}</span>
+      <summary><span><b>{{ c.name }}</b> <span class="muted">{{ c.area_name }}, {{ 'ผ่านเครื่องในโรงงาน' if c.mode == 'agent' else 'เซิร์ฟเวอร์ดึงเอง' }}</span>
+        {% if not c.active %} <span class="chip chip-plain">ปิดใช้</span>{% elif c.last_error %} <span class="chip chip-error">ถ่ายครั้งล่าสุดไม่สำเร็จ</span>{% endif %}
+        {% if c.active %}<br><span class="muted">{{ info[c.id].text }} <em>({{ info[c.id].source }})</em></span>{% endif %}</span>
         <span class="muted">{{ 'ถ่ายล่าสุด ' ~ (c.last_capture_at|dt) if c.last_capture_at else 'ยังไม่เคยถ่าย' }}</span></summary>
       {% if c.last_error %}<p class="note red" style="margin:0 4px 10px">{{ c.last_error }}</p>{% endif %}
       {{ form(c) }}
@@ -58,11 +73,27 @@
         <form method="post" action="/admin/cameras/{{ c.id }}/delete" class="inline" data-confirm="ลบกล้อง {{ c.name }} ภาพที่ถ่ายไว้ยังอยู่"><button class="btn small danger">ลบกล้องนี้</button></form>
       </div>
     </details>
-    {% else %}<div class="empty"><p>ยังไม่มีกล้อง IP เพิ่มกล้องแรกจากแบบฟอร์มด้านล่าง</p></div>
-    {% endfor %}
+    {% endfor %}{% endif %}{% endfor %}
+    {% if orphans %}
+    <div class="area-head"><h3>กล้องของแผนกที่ปิดการใช้งาน</h3><span class="muted">{{ orphans|length }} กล้อง ไม่ถูกถ่ายอัตโนมัติจนกว่าจะย้ายแผนก</span></div>
+    {% for c in orphans %}<details class="edit"><summary><span><b>{{ c.name }}</b> <span class="muted">{{ c.department.name }}, {{ c.area_name }}</span></span></summary>{{ form(c) }}
+      <form method="post" action="/admin/cameras/{{ c.id }}/delete" data-confirm="ลบกล้อง {{ c.name }} ภาพที่ถ่ายไว้ยังอยู่" style="padding:0 4px 14px"><button class="btn small danger">ลบกล้องนี้</button></form></details>{% endfor %}
+    {% endif %}
+    {% if not items %}<div class="empty"><p>ยังไม่มีกล้อง IP เพิ่มกล้องแรกจากแบบฟอร์มด้านล่าง</p></div>{% endif %}
     <details class="edit add"><summary>เพิ่มกล้อง IP</summary>{{ form(none) }}</details>
     {% endif %}
   </section>
+
+  <form method="post" action="/admin/cameras/schedule" class="panel">
+    <h2>ตารางเวลาค่ากลาง</h2>
+    <p class="muted">ใช้กับกล้องทุกตัวที่ไม่ได้ตั้งตารางของตัวเอง และแผนกของกล้องนั้นไม่ได้ตั้งตารางของแผนก ตอนนี้: {{ default_text }} ตารางของแผนกตั้งที่หน้า <a href="/admin/departments">แผนก</a></p>
+    {{ sc.fields(default_sched, day_names) }}
+    <div class="grid-2">
+      <label class="field"><span>วันหยุดที่ไม่ถ่าย <em>ปปปป-ดด-วว บรรทัดละวัน</em></span><textarea name="holidays" placeholder="2026-12-31&#10;2027-01-01">{{ s.cam_holidays|join('\n') }}</textarea></label>
+      <label class="field"><span>ถ้าเลยเวลาถ่ายไม่เกินกี่นาที ให้ถ่ายชดเชย <em>เช่น เครื่องเพิ่งเปิด</em></span><input type="number" name="grace" value="{{ s.cam_grace_min }}" min="1" max="240"></label>
+    </div>
+    <button class="btn primary">บันทึกตารางเวลาค่ากลาง</button>
+  </form>
 
   <section class="panel">
     <div class="split"><h2>โปรแกรมกล้องบนเครื่องในโรงงาน</h2>
@@ -70,7 +101,9 @@
     <p>ระบบบน cloud มองไม่เห็นกล้องในเครือข่ายโรงงาน จึงใช้โปรแกรมเล็ก ๆ ชื่อ <b>tools/camera_agent.py</b> รันบนคอมพิวเตอร์ในโรงงานเครื่องหนึ่ง โปรแกรมจะดึงภาพจากกล้องแล้วส่งขึ้นมาให้</p>
     {% if token %}
     <label class="field"><span>รหัสของโปรแกรมกล้อง <em>เก็บเป็นความลับ ใครมีรหัสนี้ส่งภาพเข้าระบบได้</em></span><input type="text" value="{{ token }}" readonly onclick="this.select()"></label>
-    <p class="muted">ถ่ายทุกกล้องตามเวลาที่กำหนด (แนะนำ ไม่ทำให้ host ฟรีตื่นตลอดเวลา)</p>
+    <p class="muted">ถ่ายตามตารางเวลาที่ตั้งในหน้านี้ แยกรายกล้องและรายแผนก (แนะนำ) โปรแกรมรับตารางจากระบบเอง แก้ตารางที่หน้าเว็บได้โดยไม่ต้องแตะเครื่องในโรงงาน</p>
+    <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }}</pre>
+    <p class="muted">แบบเดิม: ถ่ายทุกกล้องพร้อมกันตามเวลาที่ระบุในคำสั่ง (ไม่ใช้ตารางในหน้านี้)</p>
     <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }} --times 09:30,14:30</pre>
     <p class="muted">สุ่มเวลาถ่ายวันละ 2 ครั้งในช่วงเวลางาน แผนกจะเตรียมพื้นที่ล่วงหน้าไม่ได้</p>
     <pre class="code">python camera_agent.py --server {{ s.public_url or 'https://ที่อยู่เว็บของระบบ' }} --token {{ token }} --random 2 --between 08:30-16:30</pre>

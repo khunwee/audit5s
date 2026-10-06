@@ -167,6 +167,9 @@ def housekeeping() -> dict:
         out["backup"] = storage.backup_reminders(db, settings_store.load())
         from . import actions
         out["actions"] = actions.overdue_reminders(db)
+        from . import rounds_auto, scheduler
+        rounds_auto.ensure(db)
+        out["cameras"] = scheduler.stale_cameras(db)
         today = (now() + _td(hours=7)).date()
         out["closing"] = 0
         for rnd in db.query(Round).filter(Round.status == "open").all():

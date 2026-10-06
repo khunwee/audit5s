@@ -58,6 +58,12 @@ DEFAULTS = {
     "tv_hours": "",                   # ช่วงเวลาที่จออัปเดตข้อมูล เช่น 07:00-19:00 ว่าง = ทั้งวัน
     "tv_clock": True,
     "tv_unranked": True,              # แสดงแผนกที่ยังไม่ถูกจัดอันดับ
+    # ---- รุ่น 1.5: ตารางเวลาของกล้อง และรอบอัตโนมัติ
+    "cam_schedule": {"times": [], "random": 0, "between": "08:30-16:30", "days": [0, 1, 2, 3, 4]},   # ค่ากลางของทุกกล้อง
+    "cam_holidays": [],               # วันที่ไม่ถ่ายอัตโนมัติ (ปปปป-ดด-วว)
+    "cam_grace_min": 20,              # เลยเวลาถ่ายไม่เกินกี่นาทียังถ่ายชดเชย
+    "rounds_repeat": "off",           # สร้างรอบถัดไปเอง: off | weekly | monthly
+    "rounds_repeat_prefix": "ตรวจ 5ส",
 }
 
 _lock = threading.Lock()

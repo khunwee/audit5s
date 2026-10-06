@@ -8,6 +8,8 @@
 ต้องการแค่ Python 3.8+ ไม่ต้องติดตั้งแพ็กเกจเพิ่ม (กล้องแบบ RTSP ต้อง: pip install opencv-python-headless)
 
 ตัวอย่าง
+  ถ่ายตามตารางเวลาที่ตั้งในหน้า จัดการ > กล้อง (แนะนำ: แยกตารางได้รายกล้องและรายแผนก แก้ตารางที่หน้าเว็บได้เลย)
+      python camera_agent.py --server https://xxx.onrender.com --token รหัส
   ถ่ายทุกกล้องตอนนี้ 1 ครั้งแล้วจบ (ใช้ทดสอบ หรือสั่งจาก Task Scheduler ของ Windows)
       python camera_agent.py --server https://xxx.onrender.com --token รหัส --once
   ถ่ายทุกวันตามเวลา
@@ -22,6 +24,7 @@
 """
 import argparse
 import json
+import os
 import random
 import ssl
 import sys
@@ -31,7 +34,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timedelta
 
-VERSION = "1.1.0"
+VERSION = "1.5.0"
 _NO_VERIFY = ssl.create_default_context()
 _NO_VERIFY.check_hostname = False
 _NO_VERIFY.verify_mode = ssl.CERT_NONE      # กล้อง IP ส่วนใหญ่ใช้ใบรับรองที่ออกเอง
@@ -63,9 +66,11 @@ class Api:
     def poll(self) -> dict:
         return self._open(urllib.request.Request(self.base + "/api/agent/poll", headers=self.headers), timeout=90)
 
-    def upload(self, camera_id: int, jpeg: bytes = None, error: str = "") -> dict:
+    def upload(self, camera_id: int, jpeg: bytes = None, error: str = "", scheduled: str = "") -> dict:
         boundary = uuid.uuid4().hex
         parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="camera_id"\r\n\r\n{camera_id}\r\n'.encode()]
+        if scheduled:
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="scheduled"\r\n\r\n{scheduled}\r\n'.encode())
         if error:
             parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="error"\r\n\r\n'.encode()
                          + error.encode("utf-8") + b"\r\n")
@@ -142,9 +147,13 @@ def rtsp_snapshot(cam: dict) -> bytes:
         cap.release()
 
 
-def capture(api: Api, cam: dict) -> bool:
+def grab(cam: dict) -> bytes:
+    return rtsp_snapshot(cam) if cam.get("source") == "rtsp" else http_snapshot(cam)
+
+
+def capture(api, cam: dict, scheduled: str = "") -> bool:
     try:
-        jpeg = rtsp_snapshot(cam) if cam.get("source") == "rtsp" else http_snapshot(cam)
+        jpeg = grab(cam)
     except Exception as e:
         say(f"  {cam['name']}: ถ่ายไม่สำเร็จ ({e})")
         try:
@@ -153,7 +162,7 @@ def capture(api: Api, cam: dict) -> bool:
             pass
         return False
     try:
-        res = api.upload(cam["id"], jpeg=jpeg)
+        res = api.upload(cam["id"], jpeg=jpeg, scheduled=scheduled)
         say(f"  {cam['name']}: ส่งแล้ว {len(jpeg) // 1024} KB เป็นภาพเลขที่ {res.get('id')}")
         return True
     except RuntimeError as e:
@@ -198,6 +207,91 @@ def plan_for(day: datetime, fixed: list, n_random: int, window: tuple) -> list:
     return sorted(times)
 
 
+# --------------------------------------------------------------------------- โหมดตามตารางของระบบ
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_state.json")
+
+
+def _minutes(hhmm: str) -> int:
+    return int(hhmm[:2]) * 60 + int(hhmm[3:5])
+
+
+def load_done(day: str) -> set:
+    """ครั้งที่ถ่ายไปแล้วของวันนี้ เก็บในไฟล์ข้างโปรแกรม ปิดแล้วเปิดใหม่จึงไม่ถ่ายซ้ำ"""
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {(int(c), t) for c, t in data.get("done", [])} if data.get("date") == day else set()
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def save_done(day: str, done: set):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"date": day, "done": sorted(done)}, f)
+    except OSError:
+        pass
+
+
+def auto_due(data: dict, hhmm: str, done: set) -> list:
+    """(กล้อง, เวลาตามตาราง, ยังอยู่ในช่วงที่ถ่ายชดเชยได้หรือไม่) ของครั้งที่ถึงเวลาแล้วและยังไม่ได้ทำ"""
+    out, grace = [], int(data.get("grace") or 20)
+    for cam in data.get("cameras") or []:
+        for t in (data.get("plan") or {}).get(str(cam["id"]), []):
+            if (cam["id"], t) not in done and _minutes(t) <= _minutes(hhmm):
+                out.append((cam, t, _minutes(hhmm) - _minutes(t) <= grace))
+    return out
+
+
+def server_clock(data: dict, local: datetime) -> timedelta:
+    """ส่วนต่างระหว่างเวลาไทยของระบบกับนาฬิกาของเครื่องนี้ (เครื่องที่ตั้งเขตเวลาผิดยังถ่ายตรงเวลา)"""
+    try:
+        there = datetime.strptime(f"{data['date']} {data['now']}", "%Y-%m-%d %H:%M")
+    except (KeyError, ValueError):
+        return timedelta(0)
+    diff = there - local.replace(second=0, microsecond=0)
+    return diff if abs(diff) > timedelta(minutes=3) else timedelta(0)
+
+
+def auto_step(api, state: dict, local: datetime = None) -> list:
+    """หนึ่งรอบของโหมดตามตาราง คืน [(ชื่อกล้อง, เวลา, ผล)] ผล = sent | failed | late | closed"""
+    local = local or datetime.now()
+    sync_every = state.get("sync_minutes", 60) * 60
+    stale = state.get("data") is None or time.time() - state.get("synced", 0) >= sync_every
+    now = local + state.get("offset", timedelta(0))
+    if stale or state.get("day") != now.strftime("%Y-%m-%d"):
+        data = api.poll()
+        state.update(data=data, synced=time.time(), offset=server_clock(data, local))
+        now = local + state["offset"]
+        day = data.get("date") or now.strftime("%Y-%m-%d")
+        if state.get("day") != day:
+            state.update(day=day, done=load_done(day))
+            plan = data.get("plan") or {}
+            total = sum(len(v) for v in plan.values())
+            say(f"ตารางของวันที่ {day}: {len(data.get('cameras') or [])} กล้อง รวม {total} ครั้ง"
+                + (f" (นาฬิกาเครื่องนี้ต่างจากเวลาไทย {int(state['offset'].total_seconds() // 60)} นาที ใช้เวลาของระบบ)" if state["offset"] else ""))
+            for cam in data.get("cameras") or []:
+                times = plan.get(str(cam["id"]), [])
+                say(f"  {cam.get('department', '')} / {cam['name']}: " + (", ".join(times) if times else "ไม่มีการถ่ายวันนี้"))
+    hhmm, results = now.strftime("%H:%M"), []
+    if not auto_due(state["data"], hhmm, state["done"]):
+        return results
+    data = api.poll()                                   # ก่อนถ่าย: รับการตั้งค่ากล้องและสถานะรอบล่าสุด
+    state.update(data=data, synced=time.time())
+    for cam, t, fresh in auto_due(data, hhmm, state["done"]):
+        state["done"].add((cam["id"], t))
+        if not fresh:
+            say(f"  {cam['name']}: เลยเวลา {t} มานานเกินไป ข้ามครั้งนี้")
+            results.append((cam["name"], t, "late"))
+        elif not data.get("open_round"):
+            say(f"  {cam['name']}: ถึงเวลา {t} แต่ไม่มีรอบการตรวจที่เปิดรับภาพ")
+            results.append((cam["name"], t, "closed"))
+        else:
+            results.append((cam["name"], t, "sent" if capture(api, cam, scheduled=t) else "failed"))
+    save_done(state["day"], state["done"])
+    return results
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="5ส Vision camera agent")
     ap.add_argument("--server", required=True, help="ที่อยู่เว็บของระบบ เช่น https://xxx.onrender.com")
@@ -208,6 +302,8 @@ def main(argv=None) -> int:
     ap.add_argument("--between", default="08:30-16:30", help="ช่วงเวลาที่ใช้สุ่ม")
     ap.add_argument("--listen", default="", help="ช่วงเวลาที่รับคำสั่งถ่ายจากหน้าเว็บ เช่น 08:00-17:00")
     ap.add_argument("--poll-seconds", type=int, default=20, help="ความถี่ที่ถามระบบในช่วง --listen")
+    ap.add_argument("--sync-minutes", type=int, default=60,
+                    help="โหมดตามตาราง: รับตารางและรายชื่อกล้องใหม่จากระบบทุกกี่นาที (ก่อนถ่ายทุกครั้งจะรับใหม่อยู่แล้ว)")
     args = ap.parse_args(argv)
     api = Api(args.server, args.token)
 
@@ -224,11 +320,32 @@ def main(argv=None) -> int:
     except (ValueError, IndexError):
         say("รูปแบบเวลาไม่ถูกต้อง ใช้ ชั่วโมง:นาที เช่น 09:30 และช่วงเวลาเช่น 08:00-17:00")
         return 2
-    if not fixed and not args.random and not listen:
-        say("ระบุอย่างน้อยหนึ่งอย่าง: --once, --times, --random หรือ --listen")
-        return 2
-
     say(f"camera agent {VERSION} เริ่มทำงาน เชื่อมกับ {api.base}")
+    if not fixed and not args.random:
+        # ไม่ได้ระบุเวลาในคำสั่ง: ถ่ายตามตารางรายกล้องที่ตั้งในหน้า จัดการ > กล้อง
+        say("โหมดตามตารางของระบบ: ตั้งและแก้ตารางได้ที่หน้า จัดการ > กล้อง")
+        state = {"sync_minutes": max(5, args.sync_minutes)}
+        while True:
+            now = datetime.now()
+            try:
+                auto_step(api, state, now)
+                minute = now.hour * 60 + now.minute
+                if listen and listen[0] <= minute < listen[1]:
+                    data = api.poll()
+                    wanted = set(data.get("requests") or [])
+                    for cam in data.get("cameras") or []:
+                        if cam["id"] in wanted:
+                            say(f"ได้รับคำสั่งถ่ายจากหน้าเว็บ: {cam['name']}")
+                            capture(api, cam)
+            except RuntimeError as e:
+                say(str(e))
+            except KeyboardInterrupt:
+                return 0
+            in_listen = listen and listen[0] <= (now.hour * 60 + now.minute) < listen[1]
+            try:
+                time.sleep(max(5, args.poll_seconds) if in_listen else 20)
+            except KeyboardInterrupt:
+                return 0
     day, plan = None, []
     while True:
         now = datetime.now()

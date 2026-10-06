@@ -509,7 +509,8 @@ def test_06_camera_agent_api():
     data = anon.get("/api/agent/poll", headers=h).json()
     assert data["open_round"] is True and data["requests"] == []
     assert data["cameras"] == [dict(id=c9, name="กล้องคลัง (agent)", source="snapshot", url="http://192.168.1.50/snap.jpg",
-                                    username="admin", password="pw", auth="digest")]
+                                    username="admin", password="pw", auth="digest", department=data["cameras"][0]["department"],
+                                    area="กล้องคลัง (agent)")]
     assert "เชื่อมต่ออยู่" in a.get("/admin/cameras").text
     assert a.get(f"/admin/cameras/{c9}/test.jpg").status_code == 400
     # สั่งถ่ายจากหน้าเว็บ -> agent เห็นคำสั่ง -> ส่งภาพขึ้นมา

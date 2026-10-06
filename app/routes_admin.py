@@ -12,7 +12,8 @@ from PIL import Image, ImageDraw
 from sqlalchemy import case, func
 from starlette.background import BackgroundTask
 
-from . import (actions as act_mod, ai, backup, cameras, config, notify, rules, scoring, security, settings_store,
+from . import (actions as act_mod, ai, backup, cameras, config, notify, rounds_auto, rules, schedule, scheduler, scoring,
+               security, settings_store,
                storage, worker)
 from .db import (DEFAULT_CRITERIA, Action, AuditArea, AuditLog, Camera, Checkpoint, checklist_snapshot, seed_checkpoints, Channel, Criterion, Department, DeptSummary, NotifyEvent,
                  NotifyLog, Photo, PhotoImage, PhotoThumb, Round, User, get_db, log, now, rubric_snapshot)
@@ -83,6 +84,7 @@ def overview(request: Request, user=Depends(manager_user), db=Depends(get_db)):
 # --------------------------------------------------------------------------- รอบการตรวจ
 @router.get("/rounds", response_class=HTMLResponse)
 def rounds_page(request: Request, user=Depends(need("rounds")), db=Depends(get_db)):
+    rounds_auto.ensure(db)
     rounds = db.query(Round).order_by(Round.id.desc()).all()
     stats = {}
     for rid, n, img, size in (db.query(Photo.round_id, func.count(Photo.id),
@@ -116,18 +118,38 @@ def round_save(request: Request, form=Depends(form_data), user=Depends(need("rou
             return back("/admin/checkpoints" if can(user, "criteria") else "/admin/rounds")
         rnd = Round(rubric=rubric, status="open", mode=mode, checklist=checklist,
                     rule_rev=int(s.get("_rule_rev", 0) or 0))
+        start = _date(form.get("start_date"))
+        if form.get("auto_open") == "1" and start is not None and start > rounds_auto.today():
+            rnd.status = "planned"                       # รอเปิดเองเมื่อถึงวันเริ่ม
         db.add(rnd)
         log(db, user, "create_round", f"{name} ({'รายการตรวจ' if mode == 'checklist' else 'ระดับ 0-4'}, เกณฑ์ฉบับที่ {rnd.rule_rev})")
     rnd.name = name
     rnd.note = (form.get("note") or "").strip()[:1000]
     rnd.start_date, rnd.end_date = _date(form.get("start_date")), _date(form.get("end_date"))
     rnd.min_photos = _int(form.get("min_photos"), 3, 1, 200)
+    rnd.auto_open = form.get("auto_open") == "1"
+    rnd.auto_close = form.get("auto_close") == "1"
+    if rnd.auto_close and rnd.end_date is None:
+        rnd.auto_close = False
+        flash(request, "ปิดรอบอัตโนมัติต้องมีวันสิ้นสุด จึงยังไม่ได้เปิดใช้ตัวเลือกนี้", "warn")
     db.flush()
-    if created:
+    if created and rnd.status == "open":
         notify.emit(db, "round", round_id=rnd.id, payload={"action": "open"})
     db.commit()
     cameras.invalidate()
     flash(request, f"บันทึกรอบ {name} แล้ว")
+    return back("/admin/rounds")
+
+
+@router.post("/rounds/auto")
+def rounds_auto_save(request: Request, form=Depends(form_data), user=Depends(need("rounds")), db=Depends(get_db)):
+    repeat = form.get("rounds_repeat") if form.get("rounds_repeat") in ("off", "weekly", "monthly") else "off"
+    settings_store.save(db, {"rounds_repeat": repeat, "rounds_repeat_prefix": (form.get("prefix") or "ตรวจ 5ส").strip()[:60]})
+    log(db, user, "save_round_repeat", {"off": "ไม่สร้างรอบถัดไปเอง", "weekly": "สร้างรอบถัดไปทุกสัปดาห์",
+                                         "monthly": "สร้างรอบถัดไปทุกเดือน"}[repeat])
+    db.commit()
+    made = rounds_auto.apply(db)
+    flash(request, "บันทึกการตั้งค่ารอบอัตโนมัติแล้ว" + (f" และสร้างรอบ {', '.join(made['created'])}" if made["created"] else ""))
     return back("/admin/rounds")
 
 
@@ -429,7 +451,7 @@ def quality_page(request: Request, round: int = 0, user=Depends(need("score")), 
 def departments_page(request: Request, user=Depends(need("departments")), db=Depends(get_db)):
     items = db.query(Department).order_by(Department.active.desc(), Department.name).all()
     counts = dict(db.query(Photo.department_id, func.count(Photo.id)).group_by(Photo.department_id).all())
-    return render(request, "admin/departments.html", user, db, items=items, counts=counts)
+    return render(request, "admin/departments.html", user, db, items=items, counts=counts, day_names=schedule.DAY_NAMES)
 
 
 @router.post("/departments/save")
@@ -449,6 +471,11 @@ def department_save(request: Request, form=Depends(form_data), user=Depends(need
         db.add(d)
     d.code, d.name = code, name
     d.name_en = (form.get("name_en") or "").strip()[:120]
+    if form.get("cam_sched_mode") == "own":
+        d.cam_schedule = schedule.from_form(form, "sched_")
+    elif form.get("cam_sched_mode") == "inherit":
+        d.cam_schedule = None
+    cameras.invalidate()
     d.zone = (form.get("zone") or "").strip()[:120]
     d.active = form.get("active", "1") == "1"
     log(db, user, "save_department", f"{code} {name}")
@@ -813,10 +840,24 @@ def notification_action(cid: int, action: str, request: Request, user=Depends(ad
 @router.get("/cameras", response_class=HTMLResponse)
 def cameras_page(request: Request, user=Depends(admin_user), db=Depends(get_db)):
     s = settings_store.load()
-    return render(request, "admin/cameras.html", user, db,
-                  items=db.query(Camera).order_by(Camera.active.desc(), Camera.name).all(),
-                  depts=db.query(Department).filter(Department.active.is_(True)).order_by(Department.name).all(),
-                  token=s.get("agent_token", ""), agent_online=cameras.agent_online(), s=s)
+    if not s.get("_sched_secret"):
+        settings_store.save(db, {"_sched_secret": secrets.token_hex(16)})
+        s = settings_store.load()
+    eff = scheduler.effective_map(db)
+    items = db.query(Camera).order_by(Camera.active.desc(), Camera.department_id, Camera.name).all()
+    by_dept = {}
+    for c in items:
+        by_dept.setdefault(c.department_id, []).append(c)
+    labels = {"camera": "ตารางของกล้องนี้", "department": "ตารางของแผนก", "default": "ค่ากลาง", "off": "ปิดเฉพาะกล้องนี้"}
+    info = {cid: dict(text=schedule.describe(sched), source=labels[src]) for cid, (_, sched, src) in eff.items()}
+    depts = db.query(Department).filter(Department.active.is_(True)).order_by(Department.name).all()
+    shown = {d.id for d in depts}
+    return render(request, "admin/cameras.html", user, db, items=items, by_dept=by_dept, info=info, depts=depts,
+                  orphans=[c for c in items if c.department_id not in shown],
+                  token=s.get("agent_token", ""), agent_online=cameras.agent_online(), s=s,
+                  default_sched=schedule.normalize(**schedule._kw(s.get("cam_schedule") or {})),
+                  default_text=schedule.describe(s.get("cam_schedule")), day_names=schedule.DAY_NAMES,
+                  n_scheduled=sum(1 for _, sched, _ in eff.values() if sched), describe=schedule.describe)
 
 
 @router.post("/cameras/save")
@@ -849,10 +890,28 @@ def camera_save(request: Request, form=Depends(form_data), user=Depends(admin_us
     elif not cam.username:
         cam.password = ""
     cam.active = form.get("active", "1") == "1"
-    log(db, user, "save_camera", f"{name} ({cam.mode}, {cam.source}) แผนก {dept.name}")
+    cam.sched_mode = form.get("sched_mode") if form.get("sched_mode") in ("inherit", "own", "off") else "inherit"
+    cam.schedule = schedule.from_form(form, "sched_") if cam.sched_mode == "own" else None
+    log(db, user, "save_camera", f"{name} ({cam.mode}, {cam.source}) แผนก {dept.name}, ตาราง: "
+        + {"inherit": "ตามแผนกหรือค่ากลาง", "off": "ไม่ถ่ายอัตโนมัติ"}.get(cam.sched_mode, schedule.describe(cam.schedule)))
     db.commit()
     cameras.invalidate()
     flash(request, f"บันทึกกล้อง {name} แล้ว")
+    return back("/admin/cameras")
+
+
+@router.post("/cameras/schedule")
+def camera_default_schedule(request: Request, form=Depends(form_data), user=Depends(admin_user), db=Depends(get_db)):
+    """ตารางเวลาค่ากลางของทุกกล้อง วันหยุดที่ไม่ถ่าย และช่วงเวลาที่ยอมให้ถ่ายชดเชย"""
+    import re as _re
+    sched = schedule.from_form(form, "sched_")
+    days_off = sorted({x for x in _re.split(r"[\s,]+", form.get("holidays") or "") if _re.match(r"^\d{4}-\d{2}-\d{2}$", x)})
+    settings_store.save(db, {"cam_schedule": sched, "cam_holidays": days_off[:400],
+                             "cam_grace_min": _int(form.get("grace"), 20, 1, 240)})
+    log(db, user, "save_camera_schedule", f"ค่ากลาง: {schedule.describe(sched)}, วันหยุด {len(days_off)} วัน")
+    db.commit()
+    cameras.invalidate()
+    flash(request, "บันทึกตารางเวลาค่ากลางแล้ว โปรแกรมกล้องจะรับตารางใหม่ในการถามครั้งถัดไป")
     return back("/admin/cameras")
 
 

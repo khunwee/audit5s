@@ -4,3 +4,5 @@ __pycache__/
 data/
 .env
 .pytest_cache/
+agent_state.json
+tools/agent_state.json

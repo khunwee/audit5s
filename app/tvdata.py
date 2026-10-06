@@ -51,7 +51,8 @@ def compute(db, s, n_rounds: int) -> dict:
     if cur is None:
         return dict(base, round=None, rows=[], unranked=[], history=dict(rounds=[], series=[]), cats=[], pareto=[],
                     actions=dict(open=0, overdue=0), summary=dict(good=0, mid=0, low=0, avg=None, photos=0))
-    rounds = list(reversed(db.query(Round).filter(Round.id <= cur.id).order_by(Round.id.desc()).limit(n_rounds).all()))
+    rounds = list(reversed(db.query(Round).filter(Round.id <= cur.id, Round.status != "planned")
+                           .order_by(Round.id.desc()).limit(n_rounds).all()))
     en = {d.id: (d.name_en or "") for d in db.query(Department).all()}
     per, names = [], {}
     for r in rounds:

@@ -87,7 +87,7 @@ def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
         r["rank"] = ranked[i - 1]["rank"] if same else i + 1
     prev = None
     if with_prev:
-        prev = db.query(Round).filter(Round.id < rnd.id).order_by(Round.id.desc()).first()
+        prev = db.query(Round).filter(Round.id < rnd.id, Round.status != "planned").order_by(Round.id.desc()).first()
         if prev:
             old = {r["dept"].id: r["avg"] for r in round_ranking(db, prev, with_prev=False)["ranked"]}
             for r in ranked:
