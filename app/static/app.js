@@ -408,16 +408,37 @@
         .then(function () { btn.disabled = false; btn.textContent = label; });
     };
     $('[data-act=models]', box).addEventListener('click', function (e) {
-      post('/admin/ai/models', e.target, 'กำลังดึงรายชื่อ', function (d) {
-        var list = $('datalist', box);
-        while (list.firstChild) list.removeChild(list.firstChild);
-        d.models.forEach(function (m) { var o = document.createElement('option'); o.value = m; list.appendChild(o); });
+      post('/admin/ai/models', e.target, 'กำลังดึงรายชื่อและตรวจว่ารุ่นใดรับภาพได้', function (d) {
+        // รายชื่อเป็นช่องเลือกจริง กดแล้วเห็นครบทุกรุ่น ไม่ขึ้นกับข้อความที่พิมพ์ค้างไว้ในช่องโมเดล
+        var pick = $('[data-pick]', box), f = $('[data-f=model]', box), likely = d.likely || [];
+        while (pick.firstChild) pick.removeChild(pick.firstChild);
+        var add = function (value, text) { var o = document.createElement('option'); o.value = value; o.textContent = text; pick.appendChild(o); };
+        add('', 'เลือกโมเดล (' + d.models.length + ' รุ่น)');
+        var mark = d.tested ? '  (รับภาพได้ ทดสอบแล้ว)' : '  (น่าจะรับภาพได้)';
+        d.models.forEach(function (m) { add(m, m + (d.type !== 'gemini' && likely.indexOf(m) >= 0 ? mark : '')); });
+        $('[data-pick-wrap]', box).hidden = !d.models.length;
+        pick.value = d.models.indexOf(f.value) >= 0 ? f.value : '';
         out.className = 'note blue';
-        out.textContent = d.models.length ? 'พบ ' + d.models.length + ' โมเดล คลิกช่องโมเดลเพื่อเลือก เช่น ' + d.models.slice(0, 4).join(', ')
-                                          : 'ไม่พบโมเดลที่ใช้ได้กับ key นี้';
-        var f = $('[data-f=model]', box); if (!f.value && d.models.length) f.value = d.models[0];
+        if (!d.models.length) {
+          out.textContent = 'ไม่พบโมเดลที่ใช้ได้กับ key นี้';
+        } else if (!likely.length) {
+          out.className = 'note';
+          out.textContent = d.tested ? 'พบ ' + d.models.length + ' โมเดล แต่ทดสอบแล้วไม่มีรุ่นใดรับภาพได้ด้วย key นี้ ผู้ให้บริการนี้จึงยังใช้กับระบบไม่ได้ ใช้ผู้ให้บริการอื่นเป็น AI สำรองแทน'
+                                   : 'พบ ' + d.models.length + ' โมเดล แต่ไม่มีรุ่นที่ชื่อบ่งว่ารับภาพได้ ดูชื่อรุ่น vision ในเอกสารของผู้ให้บริการ แล้วเลือกจากรายชื่อหรือพิมพ์ชื่อเอง';
+        } else {
+          out.textContent = 'พบ ' + d.models.length + ' โมเดล เลือกจากรายชื่อด้านบน แล้วกดทดสอบด้วยภาพตัวอย่าง';
+          // เติมให้เองเฉพาะเมื่อช่องว่าง หรือชื่อที่ค้างอยู่ไม่มีในรายชื่อของ key นี้
+          if (!f.value || d.models.indexOf(f.value) < 0) { f.value = likely[0]; pick.value = likely[0]; }
+          else if (likely.indexOf(f.value) < 0) {
+            out.className = 'note';
+            f.value = likely[0]; pick.value = likely[0];
+            out.className = 'note blue';
+            out.textContent = 'เปลี่ยนช่องโมเดลเป็น ' + likely[0] + ' ซึ่ง' + (d.tested ? 'ทดสอบแล้วว่ารับภาพได้' : 'น่าจะรับภาพได้') + ' กดทดสอบด้วยภาพตัวอย่างเพื่อยืนยัน';
+          }
+        }
       });
     });
+    $('[data-pick]', box).addEventListener('change', function (e) { if (e.target.value) $('[data-f=model]', box).value = e.target.value; });
     $('[data-act=test]', box).addEventListener('click', function (e) {
       post('/admin/ai/test', e.target, 'กำลังทดสอบ อาจใช้เวลาถึง 1 นาที', function (d) {
         out.className = 'flash'; out.textContent = d.message + ' อย่าลืมกดบันทึกการตั้งค่า';

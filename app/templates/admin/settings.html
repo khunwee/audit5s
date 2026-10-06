@@ -25,8 +25,9 @@
       <input type="password" name="{{ slot }}_key" data-f="key" maxlength="400" autocomplete="new-password"></label>
     {% if s[slot ~ '_key'] %}<label class="check"><input type="checkbox" name="{{ slot }}_key_clear" value="1"><span>ลบ API key ที่บันทึกไว้</span></label>{% endif %}
     <label class="field"><span>โมเดล <em>ต้องเป็นรุ่นที่รับภาพได้ กดดึงรายชื่อเพื่อเลือกจากรุ่นที่ key นี้ใช้ได้จริง</em></span>
-      <input type="text" name="{{ slot }}_model" data-f="model" value="{{ s[slot ~ '_model'] }}" maxlength="120" list="{{ slot }}_models" autocomplete="off">
-      <datalist id="{{ slot }}_models"></datalist></label>
+      <input type="text" name="{{ slot }}_model" data-f="model" value="{{ s[slot ~ '_model'] }}" maxlength="120" autocomplete="off"></label>
+    <label class="field" data-pick-wrap hidden><span>เลือกจากรายชื่อที่ดึงมา <em>เลือกแล้วชื่อจะถูกใส่ในช่องโมเดลด้านบน</em></span>
+      <select data-pick></select></label>
     <div class="actions">
       <button type="button" class="btn small" data-act="models">ดึงรายชื่อโมเดล</button>
       <button type="button" class="btn small" data-act="test">ทดสอบด้วยภาพตัวอย่าง</button>

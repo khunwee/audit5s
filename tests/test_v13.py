@@ -530,3 +530,36 @@ def test_09_pages_for_every_role_and_upgrade_from_1_2():
         assert conn.execute(text("select count(*) from checkpoints")).scalar() == 13                    # ได้รายการตรวจตั้งต้น
     for url in ("/", "/photos", f"/photos/{S['p1']}", "/ranking", "/actions", "/dashboard", "/admin/checkpoints", "/admin/rounds", "/capture"):
         assert a.get(url).status_code == 200, url
+
+
+def test_10_backup_provider_models_are_probed_not_guessed():
+    """ผู้ให้บริการแบบ OpenAI-compatible ที่ไม่บอกว่ารุ่นใดรับภาพได้: ระบบถามแต่ละรุ่นด้วยภาพทดสอบ ไม่เดาจากชื่อ"""
+    a = S["admin"]
+    names = ["allam-2-7b", "whisper-large-v3", "llama-3.3-70b-versatile", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [{"id": n} for n in names]})
+        model = json.loads(request.content)["model"]
+        asked.append(model)
+        if model == "retired-vision-model":
+            return httpx.Response(404, json={"error": {"message": "The model `retired-vision-model` does not exist or you do not have access to it."}})
+        if model.startswith("qwen/"):
+            return httpx.Response(200, json={"choices": [{"message": {"content": "<think>red square</think>{\"ok\": true}"}}]})
+        return httpx.Response(400, json={"error": {"message": "this model does not support image input"}})
+    old = ai._transport
+    ai._transport = httpx.MockTransport(handler)
+    try:
+        body = {"slot": "ai2", "type": "openai", "base": "https://api.groq.test/openai/v1", "key": "gsk_x"}
+        r = a.post("/admin/ai/models", json=body).json()
+        assert r["tested"] is True and r["likely"] == ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b"]          # รุ่นใหม่สุดขึ้นก่อน
+        assert r["models"][:2] == r["likely"] and "allam-2-7b" not in asked and "whisper-large-v3" not in asked
+        asked.clear()
+        r = a.post("/admin/ai/models", json=dict(body, base="http://192.168.1.50:11434/v1")).json()
+        assert r["tested"] is False and asked == []                                # เครื่องในโรงงาน: ไม่ไล่โหลดทุกรุ่น
+        r = a.post("/admin/ai/test", json=dict(body, model="retired-vision-model")).json()
+        assert r["ok"] is False and "does not exist" in r["error"] and "ตรวจชื่อโมเดล" in r["error"]
+        assert ai.extract_json("<think>{draft}</think>\n{\"image_ok\": true}") == {"image_ok": True}
+    finally:
+        ai._transport = old

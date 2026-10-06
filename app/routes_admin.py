@@ -688,7 +688,22 @@ async def ai_models(request: Request, user=Depends(admin_user)):
     if cfg["type"] not in ("gemini", "openai"):
         return JSONResponse({"ok": False, "error": "เลือกผู้ให้บริการก่อน"})
     try:
-        return {"ok": True, "models": await anyio.to_thread.run_sync(ai.list_models, cfg)}
+        models = await anyio.to_thread.run_sync(ai.list_models, cfg)
+        tested = False
+        if cfg["type"] == "gemini":
+            likely = models
+        elif cfg.get("_known_vision"):                       # ผู้ให้บริการบอกเองว่ารุ่นใดรับภาพได้ (เช่น OpenRouter)
+            likely, tested = [m for m in models if m in cfg["_known_vision"]], True
+        elif models and not ai.is_local(cfg["base"]):        # ไม่บอก: ถามแต่ละรุ่นด้วยภาพทดสอบเล็ก ๆ
+            found, complete = await anyio.to_thread.run_sync(ai.find_vision, cfg, models)
+            if complete or found:
+                likely, tested = found, True
+                models = found + [m for m in models if m not in found]
+            else:
+                likely = [m for m in models if ai.likely_vision(m)]
+        else:
+            likely = [m for m in models if ai.likely_vision(m)]
+        return {"ok": True, "models": models, "likely": likely, "type": cfg["type"], "tested": tested}
     except ai.AIError as e:
         return JSONResponse({"ok": False, "error": str(e)})
 

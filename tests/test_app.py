@@ -190,7 +190,7 @@ def test_03_admin_setup():
 def test_04_ai_settings_endpoints():
     c = S["admin"]
     r = c.post("/admin/ai/models", json={"slot": "ai1", "type": "gemini", "base": "", "key": "", "model": ""})
-    assert r.json() == {"ok": True, "models": ["gemini-3.8-flash"]}
+    assert r.json() == {"ok": True, "models": ["gemini-3.8-flash"], "likely": ["gemini-3.8-flash"], "type": "gemini", "tested": False}
     r = c.post("/admin/ai/test", json={"slot": "ai1", "type": "gemini", "base": "", "key": "", "model": "gemini-3.8-flash"})
     assert r.json()["ok"] is True and "5 เกณฑ์" in r.json()["message"]
     AI["gemini"] = "403"
@@ -198,7 +198,7 @@ def test_04_ai_settings_endpoints():
     assert r.json()["ok"] is False and "API key" in r.json()["error"]
     AI["gemini"] = "ok"
     r = c.post("/admin/ai/models", json={"slot": "ai2", "type": "openai", "base": "https://x.test/v1", "key": "o-key"})
-    assert r.json()["models"] == ["vision-model-a"]
+    assert r.json()["models"] == ["vision-model-a"] and r.json()["likely"] == ["vision-model-a"] and r.json()["tested"] is True
 
 
 def test_05_upload_rules():

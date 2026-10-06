@@ -9,6 +9,8 @@
 import base64
 import hashlib
 import json
+import time
+import io
 import re
 
 import httpx
@@ -204,8 +206,8 @@ def _call_openai(cfg: dict, system: str, user: str, image: bytes = None) -> str:
     headers = {"Authorization": f"Bearer {cfg['key']}"} if cfg["key"] else {}
     url = cfg["base"].rstrip("/") + "/chat/completions"
     r = _post(url, headers, body)
-    if r.status_code == 400 and "response_format" in (r.text or ""):
-        body.pop("response_format")            # บางเจ้าไม่รองรับโหมด JSON
+    if r.status_code == 400 and any(x in (r.text or "") for x in ("response_format", "json_validate_failed", "reasoning_format")):
+        body.pop("response_format")            # บางเจ้าหรือบางรุ่นไม่รองรับโหมด JSON: ขอแบบข้อความแล้วแยก JSON เอง
         r = _post(url, headers, body)
     if r.status_code != 200:
         raise _http_error(r)
@@ -226,6 +228,69 @@ def call(cfg: dict, system: str, user: str, image: bytes = None) -> str:
     if cfg["type"] == "openai":
         return _call_openai(cfg, system, user, image)
     raise AIError(f"ไม่รู้จักผู้ให้บริการ AI ชนิด {cfg['type']}", retryable=False)
+
+
+_VISION_HINTS = ("scout", "maverick", "vision", "llava", "pixtral", "-vl", "vl-", "qvq", "gemma-3", "gemma3", "llama-4", "llama4",
+                 "gpt-4o", "gpt-4.1", "gpt-5", "gemini", "claude", "minicpm", "moondream", "internvl", "molmo",
+                 "multimodal", "omni")
+_NOT_CHAT = ("whisper", "tts", "guard", "orpheus", "embed", "rerank", "allam", "playai", "speech")
+
+
+def not_chat(name: str) -> bool:
+    return any(x in name.lower() for x in _NOT_CHAT)
+
+
+def likely_vision(name: str) -> bool:
+    """เดาจากชื่อว่ารุ่นนี้น่าจะรับภาพได้ (ผู้ให้บริการแบบ OpenAI-compatible ส่วนใหญ่ไม่บอกในรายชื่อ) ปุ่มทดสอบคือตัวตัดสินจริง"""
+    n = name.lower()
+    return any(x in n for x in _VISION_HINTS) and not not_chat(n)
+
+
+def _probe_image() -> bytes:
+    from PIL import Image as _Image
+    im = _Image.new("RGB", (96, 96), (255, 255, 255))
+    im.paste((210, 30, 30), (24, 24, 72, 72))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=80)
+    return buf.getvalue()
+
+
+def probe_vision(cfg: dict, model: str) -> str:
+    """ถามโมเดลด้วยภาพเล็ก ๆ 1 ภาพ เพื่อรู้จริงว่ารับภาพได้หรือไม่ คืน yes | no | limit (ติดโควตา ควรหยุดถาม)"""
+    body = {"model": model, "temperature": 0, "max_tokens": 16, "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "What colour is the square? Answer with one word."},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(_probe_image()).decode()}}]}]}
+    headers = {"Authorization": f"Bearer {cfg['key']}"} if cfg.get("key") else {}
+    try:
+        with httpx.Client(timeout=12, transport=_transport) as client:
+            r = client.post(cfg["base"].rstrip("/") + "/chat/completions", headers=headers, json=body)
+    except httpx.HTTPError:
+        return "no"
+    return "yes" if r.status_code == 200 else "limit" if r.status_code == 429 else "no"
+
+
+def find_vision(cfg: dict, models: list, budget: float = 25.0) -> tuple:
+    """ทดสอบทีละรุ่นว่ารุ่นใดรับภาพได้ (ไม่เดาจากชื่อ เพราะผู้ให้บริการเปลี่ยนรายชื่อรุ่นบ่อย) คืน (รุ่นที่รับภาพได้, ทดสอบครบหรือไม่)"""
+    started, found = time.time(), []
+    todo = sorted([m for m in models if not not_chat(m)], key=lambda m: (0 if likely_vision(m) else 1, m))[:12]
+    for m in todo:
+        if time.time() - started > budget:
+            return found, False
+        got = probe_vision(cfg, m)
+        if got == "limit":
+            return found, False
+        if got == "yes":
+            found.append(m)
+
+    def newest(m):
+        v = re.findall(r"(\d+(?:\.\d+)?)", m)
+        return (-float(v[0]) if v else 0.0, m)
+    return sorted(found, key=newest), True
+
+
+def is_local(base: str) -> bool:
+    host = re.sub(r"^https?://", "", (base or "").lower()).split("/")[0].split(":")[0]
+    return host in ("localhost", "") or host.startswith(("127.", "10.", "192.168.", "172."))
 
 
 def _model_rank(name: str) -> tuple:
@@ -274,8 +339,13 @@ def list_models(cfg: dict) -> list:
                 def sees_images(m: dict) -> bool:
                     kinds = (m.get("architecture") or {}).get("input_modalities")
                     return not isinstance(kinds, list) or "image" in kinds
-                ids = [m["id"] for m in r.json().get("data", []) if m.get("id") and sees_images(m)]
-                return sorted(ids, key=lambda i: (0 if i.endswith(":free") else 1, i))
+                data = [m for m in r.json().get("data", []) if m.get("id") and sees_images(m)]
+                known = {m["id"] for m in data if isinstance((m.get("architecture") or {}).get("input_modalities"), list)}
+                cfg["_known_vision"] = sorted(known)
+                ids = [m["id"] for m in data]
+                # รุ่นที่น่าจะรับภาพได้ขึ้นก่อน รุ่นที่ไม่ใช่โมเดลสนทนา (เสียง ตัวกรอง) ไปท้ายสุด
+                return sorted(ids, key=lambda i: (0 if i in known or likely_vision(i) else 2 if not_chat(i) else 1,
+                                                  0 if i.endswith(":free") else 1, i))
     except httpx.HTTPError as e:
         raise AIError(f"เชื่อมต่อไม่ได้: {type(e).__name__}", retryable=True)
     return []
@@ -284,6 +354,9 @@ def list_models(cfg: dict) -> list:
 # --------------------------------------------------------------------------- ตรวจคำตอบ
 def extract_json(text: str) -> dict:
     t = (text or "").strip()
+    # โมเดลแบบคิดก่อนตอบบางรุ่นส่งส่วนที่คิดมาด้วยในแท็ก think: ตัดออกก่อนหา JSON
+    t = re.sub(r"<think>.*?</think>", "", t, flags=re.S | re.I)
+    t = re.sub(r"^.*?</think>", "", t, flags=re.S | re.I).strip()
     t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t, flags=re.I).strip()
     a, b = t.find("{"), t.rfind("}")
     if a < 0 or b <= a:
