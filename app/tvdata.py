@@ -70,6 +70,7 @@ def compute(db, s, n_rounds: int) -> dict:
         d, before = r["dept"], prev.get(r["dept"].id) or {}
         ac = dash["act_by_dept"].get(d.id, {"open": 0, "overdue": 0})
         rows.append(dict(id=d.id, code=d.code, name=d.name, name_en=en.get(d.id, ""), rank=r["rank"], avg=r["avg"],
+                         group=r.get("group") or "", group_rank=r.get("group_rank"),
                          band=band(r["avg"]), scored=r["scored"], unverified=r["unverified"],
                          delta=round(r["avg"] - before["avg"], 1) if before.get("avg") is not None else None,
                          rank_delta=(before["rank"] - r["rank"]) if before.get("rank") else None,
@@ -78,7 +79,7 @@ def compute(db, s, n_rounds: int) -> dict:
                      missing=len(r["missing"])) for r in rk["unranked"] + rk["idle"]]
     current = {r["id"] for r in rows}
     order = [r["id"] for r in rows] + sorted((i for i in names if i not in current), key=lambda i: names[i].name)
-    series = [dict(id=i, name=names[i].name, name_en=en.get(i, ""),
+    series = [dict(id=i, name=names[i].name, name_en=en.get(i, ""), group=(names[i].group_name or "").strip(),
                    avg=[(t.get(i) or {}).get("avg") for t in per], rank=[(t.get(i) or {}).get("rank") for t in per])
               for i in order if any((t.get(i) or {}).get("avg") is not None for t in per)]
     text_en = {k["code"]: k.get("text_en", "") for k in (cur.checklist or [])}
@@ -87,7 +88,7 @@ def compute(db, s, n_rounds: int) -> dict:
         base,
         round=dict(id=cur.id, name=cur.name, status=cur.status, start=_d(cur.start_date), end=_d(cur.end_date),
                    mode=cur.mode or "level", min_photos=cur.min_photos),
-        rows=rows, unranked=unranked,
+        rows=rows, unranked=unranked, groups=rk.get("groups", []),
         history=dict(rounds=[dict(id=r.id, name=r.name) for r in rounds], series=series),
         cats=[dict(code=c["code"], name=c["name"], name_en=english_name(c["name"]), avg=dash["cats"].get(c["code"]),
                    band=band(dash["cats"].get(c["code"]))) for c in rk["rubric"]],
@@ -122,4 +123,4 @@ def display_config(s: dict) -> dict:
                 or s.get("org_name") or "5S", lang=s.get("tv_lang", "th"), theme=s.get("tv_theme", "light"),
                 slides=slides, seconds=int(s.get("tv_seconds", 15)), rows=int(s.get("tv_rows", 8)),
                 rounds=int(s.get("tv_rounds", 6)), refresh=int(s.get("tv_refresh_min", 5)), hours=s.get("tv_hours", ""),
-                clock=bool(s.get("tv_clock", True)), unranked=bool(s.get("tv_unranked", True)))
+                clock=bool(s.get("tv_clock", True)), unranked=bool(s.get("tv_unranked", True)), group=s.get("tv_group", ""))

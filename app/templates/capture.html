@@ -12,7 +12,7 @@
 {% else %}
 <div class="stack" id="capture" data-max-side="{{ [settings.img_max_side * 1.25, 2400]|min|int }}" data-webcam-width="{{ settings.webcam_width }}"
      data-defined='{{ defined|tojson }}' data-allow-free="{{ '1' if settings.allow_free_area else '0' }}"
-     {% if before %}data-after="{{ before.id }}" data-area="{{ before.area_name }}" data-type="{{ before.area_type }}" data-area-id="{{ before.area_id or '' }}"{% endif %}>
+     {% if before %}data-after="{{ before.id }}" data-area="{{ before.area_name }}" data-type="{{ before.area_type }}" data-area-id="{{ before.area_id or '' }}"{% endif %} data-scanned="{{ scanned.id if scanned else '' }}">
   {% if before %}
   <p class="note blue">ส่งภาพหลังแก้ไขของจุด "{{ before.area_name }}" (ภาพเลขที่ {{ before.id }}{% if before.percent is not none %}, เดิมได้ {{ before.percent|num }}%{% endif %})
     ถ่ายมุมเดียวกับภาพเดิมเพื่อให้เทียบกันได้{% if settings.after_replaces %} เมื่อภาพใหม่ได้คะแนนแล้ว ระบบจะนับภาพใหม่แทนภาพเดิม{% endif %}</p>
@@ -23,10 +23,11 @@
       <label class="field"><span>รอบการตรวจ</span>
         <select id="round">{% for r in rounds %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select></label>
       <label class="field"><span>แผนกเจ้าของพื้นที่</span>
-        <select id="dept">{% if depts|length > 1 %}<option value="">เลือกแผนก</option>{% endif %}{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if (before and d.id == before.department_id) or (not before and d.id == user.department_id) }}>{{ d.name }}</option>{% endfor %}</select></label>
+        <select id="dept">{% if depts|length > 1 %}<option value="">เลือกแผนก</option>{% endif %}{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if (scanned and d.id == scanned.dept) or (before and d.id == before.department_id) or (not before and not scanned and d.id == user.department_id) }}>{{ d.name }}</option>{% endfor %}</select></label>
     </div>
   </section>
 
+  {% if scanned %}<p class="note blue">เปิดจากป้าย QR ของจุดตรวจ <b>{{ scanned.name }}</b> กดปุ่ม ถ่ายภาพ ได้เลย ระบบเลือกแผนกและจุดตรวจให้แล้ว</p>{% endif %}
   <div class="queue" id="queue" aria-live="polite"></div>
 
   <div class="shoot-bar">

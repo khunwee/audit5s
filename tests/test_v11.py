@@ -274,7 +274,7 @@ def test_03_exports():
     r = a.get(f"/rounds/{rid}/export/ranking.csv")
     assert r.status_code == 200 and r.content[:3] == b"\xef\xbb\xbf" and "attachment" in r.headers["content-disposition"]
     rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
-    assert rows[0][:4] == ["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)"] and len(rows[0]) == 12 + len(S["codes"])
+    assert rows[0][:4] == ["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)"] and len(rows[0]) == 14 + len(S["codes"])
     ranked = [x for x in rows[1:] if x[-1] == "จัดอันดับแล้ว"]
     assert [x[0] for x in ranked] == ["1", "2", "2"] and {x[1] for x in ranked} == {"V1", "V2", "V3"}   # คะแนนเท่ากัน อันดับร่วม
     r = a.get(f"/rounds/{rid}/export/photos.csv?dept={d['V1']}")

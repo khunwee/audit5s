@@ -12,7 +12,8 @@ from PIL import Image, ImageDraw
 from sqlalchemy import case, func
 from starlette.background import BackgroundTask
 
-from . import (actions as act_mod, ai, backup, cameras, config, notify, rounds_auto, rules, schedule, scheduler, scoring,
+from . import (actions as act_mod, ai, backup, cameras, config, notify, presets, rounds_auto, rules, schedule, scheduler,
+               scoring,
                security, settings_store,
                storage, worker)
 from .db import (DEFAULT_CRITERIA, Action, AuditArea, AuditLog, Camera, Checkpoint, checklist_snapshot, seed_checkpoints, Channel, Criterion, Department, DeptSummary, NotifyEvent,
@@ -210,6 +211,7 @@ def round_action(rid: int, action: str, request: Request, user=Depends(current_u
         q.delete(synchronize_session=False)
         db.query(DeptSummary).filter(DeptSummary.round_id == rid).delete(synchronize_session=False)
         db.query(NotifyEvent).filter(NotifyEvent.round_id == rid).delete(synchronize_session=False)
+        db.query(Action).filter(Action.round_id == rid).delete(synchronize_session=False)      # งานแก้ไขที่มาจากภาพของรอบนี้
         db.delete(rnd)
         flash(request, f"ลบรอบ {rnd.name} และข้อมูลทั้งหมดของรอบแล้ว")
     log(db, user, f"round_{action}", rnd.name)
@@ -311,6 +313,46 @@ def criteria_reset(request: Request, user=Depends(need("criteria")), db=Depends(
     return back("/admin/criteria")
 
 
+# --------------------------------------------------------------------------- เริ่มต้นใช้งาน: ชุดตั้งค่าเริ่มต้น
+@router.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request, user=Depends(admin_user), db=Depends(get_db)):
+    s = settings_store.load()
+    done = dict(
+        ai=ai.is_configured(s) and s.get("ai1_type") != "demo",
+        depts=db.query(Department).filter(Department.active.is_(True)).count(),
+        users=db.query(User).filter(User.active.is_(True)).count() > 1,
+        verifier=any(security.can(u, "score") for u in db.query(User).filter(User.active.is_(True), User.role != "admin").all()),
+        round=db.query(Round).filter(Round.status.in_(["open", "planned"])).count(),
+        areas=db.query(AuditArea).filter(AuditArea.active.is_(True)).count(),
+        channel=any("system" in (c.events or []) for c in db.query(Channel).filter(Channel.active.is_(True)).all()),
+        cameras=db.query(Camera).filter(Camera.active.is_(True)).count())
+    return render(request, "admin/setup.html", user, db, s=s, done=done, labels=presets.SETTING_LABELS,
+                  previews=[presets.preview(k) for k in presets.PRESETS],
+                  n_checks=db.query(Checkpoint).filter(Checkpoint.area_id.is_(None), Checkpoint.active.is_(True)).count(),
+                  n_rounds=db.query(Round).count())
+
+
+@router.post("/setup/apply")
+def setup_apply(request: Request, form=Depends(form_data), user=Depends(admin_user), db=Depends(get_db)):
+    key = form.get("preset") or ""
+    if key not in presets.PRESETS:
+        raise HTTPException(400, "ไม่รู้จักชุดตั้งค่านี้")
+    rules_on, settings_on = form.get("rules") == "1", form.get("settings") == "1"
+    if not rules_on and not settings_on:
+        flash(request, "ยังไม่ได้เปลี่ยนอะไร ติ๊กอย่างน้อยหนึ่งอย่างที่จะให้ชุดตั้งค่านี้ตั้งให้", "err")
+        return back("/admin/setup")
+    out = presets.apply(db, key, user, rules=rules_on, settings=settings_on)
+    cameras.invalidate()
+    parts = []
+    if rules_on:
+        parts.append(f"หมวด 5 หมวดและรายการตรวจ {out['checks']} ข้อ")
+    if settings_on:
+        parts.append("การตั้งค่าที่แนะนำ")
+    flash(request, f"ใช้ชุดตั้งค่า{presets.PRESETS[key]['name']}แล้ว: {' และ'.join(parts)} มีผลกับรอบที่สร้างใหม่ "
+                   "ทำขั้นที่เหลือด้านล่างเพื่อเริ่มใช้งาน")
+    return back("/admin/setup")
+
+
 # --------------------------------------------------------------------------- รายการตรวจ (rule engine)
 @router.get("/checkpoints", response_class=HTMLResponse)
 def checkpoints_page(request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
@@ -377,12 +419,18 @@ def checkpoint_save(request: Request, form=Depends(form_data), user=Depends(need
 
 @router.post("/checkpoints/reset")
 def checkpoints_reset(request: Request, user=Depends(need("criteria")), db=Depends(get_db)):
-    db.query(Checkpoint).filter(Checkpoint.area_id.is_(None)).delete()
-    db.flush()
-    seed_checkpoints(db)
-    log(db, user, "reset_checkpoints", f"ฉบับที่ {bump_rule_rev(db)}")
+    chosen = settings_store.load().get("preset")
+    if chosen in presets.PRESETS:
+        n = presets.apply_rules(db, chosen)
+        label = f"ชุด{presets.PRESETS[chosen]['name']}"
+    else:
+        db.query(Checkpoint).filter(Checkpoint.area_id.is_(None)).delete()
+        db.flush()
+        seed_checkpoints(db)
+        n, label = 13, "ตั้งต้น"
+    log(db, user, "reset_checkpoints", f"ฉบับที่ {bump_rule_rev(db)}: {label} {n} ข้อ")
     db.commit()
-    flash(request, "คืนค่ารายการตรวจตั้งต้น 13 ข้อแล้ว (โซนของจุดตรวจไม่ถูกแตะ)")
+    flash(request, f"คืนค่ารายการตรวจ{label} {n} ข้อแล้ว (โซนของจุดตรวจไม่ถูกแตะ)")
     return back("/admin/checkpoints")
 
 
@@ -471,6 +519,7 @@ def department_save(request: Request, form=Depends(form_data), user=Depends(need
         db.add(d)
     d.code, d.name = code, name
     d.name_en = (form.get("name_en") or "").strip()[:120]
+    d.group_name = (form.get("group_name") or "").strip()[:60]
     if form.get("cam_sched_mode") == "own":
         d.cam_schedule = schedule.from_form(form, "sched_")
     elif form.get("cam_sched_mode") == "inherit":
@@ -490,11 +539,17 @@ def department_delete(did: int, request: Request, user=Depends(need("departments
     if d is None:
         return back("/admin/departments")
     in_use = (db.query(Photo).filter(Photo.department_id == did).count()
-              or db.query(Camera).filter(Camera.department_id == did).count())
+              or db.query(Camera).filter(Camera.department_id == did).count()
+              or db.query(Action).filter(Action.department_id == did).count())
     if in_use:
         d.active = False
-        flash(request, f"แผนก {d.name} มีภาพหรือกล้องในระบบ จึงปิดการใช้งานแทนการลบ", "warn")
+        flash(request, f"แผนก {d.name} มีภาพ กล้อง หรืองานแก้ไขในระบบ จึงปิดการใช้งานแทนการลบ "
+                       "ลบรอบที่มีภาพของแผนกนี้และกล้องของแผนกก่อน แล้วจึงลบแผนกได้", "warn")
     else:
+        area_ids = [a.id for a in db.query(AuditArea).filter(AuditArea.department_id == did).all()]
+        if area_ids:
+            db.query(Checkpoint).filter(Checkpoint.area_id.in_(area_ids)).delete(synchronize_session=False)
+            db.query(AuditArea).filter(AuditArea.id.in_(area_ids)).delete(synchronize_session=False)
         db.query(User).filter(User.department_id == did).update({"department_id": None})
         db.query(Channel).filter(Channel.department_id == did).update({"department_id": None, "active": False})
         db.query(DeptSummary).filter(DeptSummary.department_id == did).delete()
@@ -504,6 +559,60 @@ def department_delete(did: int, request: Request, user=Depends(need("departments
     db.commit()
     notify.refresh_channels(db)
     return back("/admin/departments")
+
+
+@router.post("/users/{uid}/delete")
+def user_delete(uid: int, request: Request, user=Depends(admin_user), db=Depends(get_db)):
+    """ลบบัญชีผู้ใช้ ภาพที่บัญชีนั้นเคยส่งยังอยู่ และยังแสดงชื่อผู้ส่งเดิม"""
+    target = db.get(User, uid)
+    if target is None:
+        return back("/admin/users")
+    if target.id == user.id:
+        flash(request, "ลบบัญชีที่กำลังใช้อยู่ไม่ได้", "err")
+        return back("/admin/users")
+    if target.role == "admin" and db.query(User).filter(User.role == "admin", User.active.is_(True), User.id != uid).count() == 0:
+        flash(request, "ต้องมีผู้ดูแลระบบที่ใช้งานได้อย่างน้อย 1 บัญชี", "err")
+        return back("/admin/users")
+    db.query(Photo).filter(Photo.uploader_id == uid).update({"uploader_id": None}, synchronize_session=False)
+    log(db, user, "delete_user", f"{target.username} ({target.full_name})")
+    db.delete(target)
+    db.commit()
+    flash(request, f"ลบบัญชี {target.username} แล้ว")
+    return back("/admin/users")
+
+
+WIPE_PHRASE = "ลบข้อมูลทดสอบ"
+
+
+@router.post("/storage/wipe")
+def storage_wipe(request: Request, form=Depends(form_data), user=Depends(admin_user), db=Depends(get_db)):
+    """ล้างข้อมูลการตรวจทั้งหมดก่อนเริ่มใช้งานจริง: รอบ ภาพ คะแนน งานแก้ไข สรุป และประวัติการแจ้งเตือน
+
+    สิ่งที่ตั้งค่าไว้ยังอยู่ครบ: แผนก จุดตรวจ รายการตรวจ เกณฑ์ ผู้ใช้ กล้อง ช่องทางแจ้งเตือน และการตั้งค่าทั้งหมด
+    """
+    from .db import AiUsage, NotifyLog
+    if (form.get("confirm") or "").strip() != WIPE_PHRASE:
+        flash(request, f"ยังไม่ได้ลบอะไร พิมพ์คำว่า {WIPE_PHRASE} ให้ตรงเพื่อยืนยัน", "err")
+        return back("/admin/storage")
+    counts = dict(rounds=db.query(Round).count(), photos=db.query(Photo).count(), actions=db.query(Action).count())
+    for model in (PhotoImage, PhotoThumb):
+        db.query(model).delete(synchronize_session=False)
+    for model in (Photo, DeptSummary, NotifyEvent, NotifyLog, Action, Round, AiUsage):
+        db.query(model).delete(synchronize_session=False)
+    for cam in db.query(Camera).all():
+        cam.last_capture_at, cam.last_error = None, ""
+    if form.get("logs") == "1":
+        db.query(AuditLog).delete(synchronize_session=False)
+    log(db, user, "wipe_test_data", f"ลบ {counts['rounds']} รอบ {counts['photos']} ภาพ {counts['actions']} งานแก้ไข"
+        + (" และบันทึกการใช้งานเดิม" if form.get("logs") == "1" else ""))
+    db.commit()
+    settings_store.save(db, {k: "" for k in settings_store.load() if k.startswith(("_alert_", "_stamp_"))} or {"_alert_x": ""})
+    cameras.invalidate()
+    scheduler.done.clear()
+    storage.compact(db, full=True)
+    flash(request, f"ลบข้อมูลการตรวจแล้ว: {counts['rounds']} รอบ {counts['photos']} ภาพ {counts['actions']} งานแก้ไข "
+                   "การตั้งค่า แผนก จุดตรวจ รายการตรวจ ผู้ใช้ และกล้องยังอยู่ครบ สร้างรอบการตรวจใหม่เพื่อเริ่มใช้งานจริง")
+    return back("/admin/storage")
 
 
 # --------------------------------------------------------------------------- จุดตรวจที่โรงงานกำหนด
@@ -517,6 +626,26 @@ def areas_page(request: Request, user=Depends(need("departments")), db=Depends(g
                   .group_by(Photo.area_id).all())
     return render(request, "admin/areas.html", user, db, depts=depts, items=items, counts=counts,
                   s=settings_store.load())
+
+
+@router.get("/areas/qr", response_class=HTMLResponse)
+def areas_qr(request: Request, dept: int = 0, user=Depends(need("departments")), db=Depends(get_db)):
+    """ป้าย QR สำหรับพิมพ์ติดที่จุดตรวจ: สแกนแล้วเปิดหน้าถ่ายภาพโดยเลือกแผนกและจุดตรวจให้เอง"""
+    import segno
+    base = (settings_store.load().get("public_url") or str(request.base_url)).rstrip("/")
+    q = db.query(AuditArea).filter(AuditArea.active.is_(True))
+    if dept:
+        q = q.filter(AuditArea.department_id == dept)
+    depts = {d.id: d for d in db.query(Department).filter(Department.active.is_(True)).all()}
+    cards = []
+    for a in q.order_by(AuditArea.department_id, AuditArea.sort_order, AuditArea.id).all():
+        if a.department_id not in depts:
+            continue
+        link = f"{base}/capture?area={a.id}"
+        svg = segno.make(link, error="m").svg_inline(scale=5, border=2, dark="#1D2A2F", omitsize=True)
+        cards.append(dict(area=a, dept=depts[a.department_id], link=link, svg=svg))
+    return render(request, "admin/areas_qr.html", user, db, cards=cards, depts=sorted(depts.values(), key=lambda d: d.name),
+                  dept=dept, base=base)
 
 
 @router.post("/areas/save")
@@ -662,6 +791,9 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
            "img_max_side": _int(form.get("img_max_side"), 1280, 640, 2400),
            "img_quality": _int(form.get("img_quality"), 78, 50, 92),
            "allow_gallery": form.get("allow_gallery") == "1",
+           "gallery_max_age_h": _int(form.get("gallery_max_age_h"), 0, 0, 8760),
+           "gallery_stale": "reject" if form.get("gallery_stale") == "reject" else "flag",
+           "dept_remind_days": _int(form.get("dept_remind_days"), 3, 0, 30),
            "storage_budget_mb": _int(form.get("storage_budget_mb"), 350, 20, 100000),
            "retention_days": _int(form.get("retention_days"), 90, 0, 3650),
            "purge_requires_backup": form.get("purge_requires_backup") == "1",
@@ -1060,6 +1192,7 @@ def photo_override(pid: int, request: Request, form=Depends(form_data), user=Dep
         p.overridden, p.override_by, p.override_note, p.override_at = True, user.full_name or user.username, note, now()
         p.review_flag = False
         p.verified_by, p.verified_at = user.full_name or user.username, now()
+        close_appeal(db, p, user, note, "ปรับผลแล้ว")
         changed = [c["code"] for c in checks if c["changed"]]
         log(db, user, "override_score", f"ภาพ {p.id}: แก้ข้อ {', '.join(changed) or '-'} เหตุผล: {note}")
         if settings_store.load().get("auto_actions", True):
@@ -1091,11 +1224,50 @@ def photo_override(pid: int, request: Request, form=Depends(form_data), user=Dep
     p.overridden, p.override_by, p.override_note, p.override_at = True, user.full_name or user.username, note, now()
     p.review_flag = False
     p.verified_by, p.verified_at = user.full_name or user.username, now()
+    close_appeal(db, p, user, note, "ปรับผลแล้ว")
     log(db, user, "override_score", f"ภาพ {p.id}: {p.score:g}/{p.max_score:g} เหตุผล: {note}")
     notify.emit(db, "result", round_id=p.round_id, department_id=p.department_id, photo_id=p.id)
     db.commit()
     flash(request, "บันทึกคะแนนที่ปรับแล้ว รายงานจะระบุว่าภาพนี้ปรับโดยกรรมการ")
     return back(f"/photos/{pid}")
+
+
+def close_appeal(db, p: Photo, user, reply: str, outcome: str):
+    """ตอบคำขอทบทวนของแผนก: บันทึกคำตอบ ผู้ตอบ และแจ้งแผนก"""
+    if p.appeal_status != "open":
+        return
+    p.appeal_status, p.appeal_closed_by, p.appeal_closed_at = "resolved", user.full_name or user.username, now()
+    p.appeal_reply = f"{outcome}: {reply}".strip(": ")[:1000] if reply else outcome
+    log(db, user, "resolve_appeal", f"ภาพ {p.id} {p.department.name} / {p.area_name}: {p.appeal_reply[:300]}")
+    link = (settings_store.load().get("public_url") or "").rstrip("/")
+    notify.emit(db, "action", round_id=p.round_id, department_id=p.department_id, payload={
+        "text": f"ผลการทบทวนภาพ {p.area_name}\n{p.appeal_reply[:400]}" + (f"\n{link}/photos/{p.id}" if link else "")})
+
+
+@router.post("/photos/{pid}/appeal-reply")
+def photo_appeal_reply(pid: int, request: Request, form=Depends(form_data), user=Depends(need("score")), db=Depends(get_db)):
+    """กรรมการดูแล้วคงผลเดิม พร้อมคำอธิบายถึงแผนก (ถ้าจะเปลี่ยนผล ใช้การปรับคะแนนด้วยกรรมการ)"""
+    p = db.get(Photo, pid)
+    if p is None:
+        raise HTTPException(404, "ไม่พบภาพนี้")
+    if not may_verify(user, p):
+        raise HTTPException(403, "ตอบคำขอทบทวนของภาพที่ตัวเองส่งไม่ได้ ให้กรรมการคนอื่นเป็นผู้ตรวจ")
+    reply = (form.get("reply") or "").strip()[:1000]
+    if p.appeal_status != "open":
+        flash(request, "ภาพนี้ไม่มีคำขอทบทวนที่รออยู่", "err")
+    elif len(reply) < 5:
+        flash(request, "ใส่คำอธิบายถึงแผนกว่าทำไมจึงคงผลเดิม", "err")
+    else:
+        close_appeal(db, p, user, reply, "คงผลเดิม")
+        if p.status == "done" and p.verified_at is None:
+            p.review_flag = False
+            p.verified_by, p.verified_at = user.full_name or user.username, now()
+            if settings_store.load().get("auto_actions", True):
+                act_mod.create_for_photo(db, p, user, settings_store.load())
+        db.commit()
+        flash(request, "ตอบคำขอทบทวนแล้ว และยืนยันผลเดิมของภาพ")
+    target = request.headers.get("referer") or ""
+    return back(target if "/verify" in target else f"/photos/{pid}")
 
 
 @router.post("/photos/{pid}/{action}")
@@ -1122,6 +1294,7 @@ def photo_action(pid: int, action: str, request: Request, user=Depends(need("sco
             p.verified_by, p.verified_at = user.full_name or user.username, now()
             log(db, user, "verify_photo", f"ภาพ {p.id} {p.department.name} / {p.area_name}: ยืนยัน {p.score:g}/{p.max_score:g}")
             made = act_mod.create_for_photo(db, p, user, settings_store.load()) if settings_store.load().get("auto_actions", True) else 0
+            close_appeal(db, p, user, "", "คงผลเดิม กรรมการดูภาพแล้วยืนยัน")
             db.commit()
             if made:
                 flash(request, f"สร้างงานแก้ไข {made} งานจากข้อที่ไม่ผ่าน")

@@ -31,6 +31,7 @@
     var queue = $('#queue'), tpl = $('#card-tpl'), sendbar = $('#sendbar'), sendBtn = $('#send');
     var maxSide = parseInt(cap.getAttribute('data-max-side'), 10) || 1600;
     var afterOf = cap.getAttribute('data-after') || '';
+    var scannedArea = cap.getAttribute('data-scanned') || '';
     var items = [], sending = false, pollTimer = null;
     var defined = JSON.parse(cap.getAttribute('data-defined') || '{}');
     var allowFree = cap.getAttribute('data-allow-free') !== '0';
@@ -95,6 +96,53 @@
       });
     };
 
+    // เวลาที่ถ่ายภาพ: อ่านจาก EXIF (DateTimeOriginal) ของไฟล์เดิมก่อนย่อ ถ้าไม่มีใช้เวลาที่แก้ไขไฟล์ล่าสุด
+    // ระบบใช้ค่านี้บอกกรรมการว่าภาพจากคลังภาพถ่ายไว้นานแล้วหรือไม่ (ผู้ที่ตั้งใจปลอมเวลาทำได้ จึงเป็นตัวช่วย ไม่ใช่หลักฐาน)
+    var pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    var isoLocal = function (d) {
+      return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    };
+    var exifDate = function (buf) {
+      try {
+        var v = new DataView(buf), n = v.byteLength, p = 2;
+        if (n < 12 || v.getUint16(0) !== 0xFFD8) return '';
+        while (p + 4 < n) {
+          var marker = v.getUint16(p), size = v.getUint16(p + 2);
+          if (marker === 0xFFE1 && v.getUint32(p + 4) === 0x45786966) {            // APP1 "Exif"
+            var t = p + 10, le = v.getUint16(t) === 0x4949;
+            var u16 = function (o) { return v.getUint16(o, le); }, u32 = function (o) { return v.getUint32(o, le); };
+            var find = function (ifd, tag) {
+              var count = u16(ifd);
+              for (var i = 0; i < count; i++) { var e = ifd + 2 + i * 12; if (e + 12 > n) return 0; if (u16(e) === tag) return e; }
+              return 0;
+            };
+            var text = function (e) {
+              if (!e) return '';
+              var off = t + u32(e + 8), s = '';
+              for (var i = 0; i < 19 && off + i < n; i++) s += String.fromCharCode(v.getUint8(off + i));
+              var m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(s);
+              return m ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] : '';
+            };
+            var ifd0 = t + u32(t + 4), sub = find(ifd0, 0x8769);
+            return (sub ? text(find(t + u32(sub + 8), 0x9003)) : '') || text(find(ifd0, 0x0132));
+          }
+          if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;
+          p += 2 + size;
+        }
+      } catch (err) { /* ไฟล์ที่อ่านไม่ได้: ถือว่าไม่ทราบเวลา */ }
+      return '';
+    };
+    var shotAt = function (file) {
+      return new Promise(function (resolve) {
+        var fallback = file.lastModified ? isoLocal(new Date(file.lastModified)) : '';
+        if (!file.slice || !window.FileReader) { resolve(fallback); return; }
+        var r = new FileReader();
+        r.onload = function () { resolve(exifDate(r.result) || fallback); };
+        r.onerror = function () { resolve(fallback); };
+        r.readAsArrayBuffer(file.slice(0, 262144));
+      });
+    };
+
     var refresh = function () {
       var waiting = items.filter(function (i) { return i.state === 'new' || i.state === 'fail'; }).length;
       sendbar.hidden = waiting === 0;
@@ -150,6 +198,9 @@
           pick.value = want; if (pick.selectedIndex < 0 || !want) pick.value = allowFree ? 'free' : '';
           syncArea(it);
         }
+      } else if (scannedArea && !$('[data-area-pick]', node).hidden) {    // เปิดจากป้าย QR ของจุดตรวจ
+        $('[data-k=area_id]', node).value = scannedArea;
+        syncArea(it);
       } else if (last) {                     // จุดตรวจถัดไปมักเป็นพื้นที่ประเภทเดียวกัน
         typeSel.value = $('[data-k=area_type]', last.el).value;
       }
@@ -157,6 +208,8 @@
       queue.appendChild(node);
       items.push(it);
       setState(it, 'new', 'กำลังเตรียมภาพ');
+      it.shot = it.source === 'gallery' ? '' : isoLocal(new Date());
+      if (it.source === 'gallery') shotAt(file).then(function (v) { it.shot = v; });
       compress(file).then(function (blob) {
         it.blob = blob;
         $('img', node).src = URL.createObjectURL(blob);
@@ -185,6 +238,7 @@
       fd.append('note', $('[data-k=note]', it.el).value);
       fd.append('source', it.source);
       if (it.after) fd.append('after_of', it.after);
+      if (it.shot) fd.append('shot_at', it.shot);
       fd.append('file', it.blob, 'photo.jpg');
       setState(it, 'sending', 'กำลังส่ง');
       return fetch('/api/photos', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (res) {
@@ -193,7 +247,9 @@
           if (!res.ok) { setState(it, 'fail', errorText(res, data) + ' แก้แล้วกดส่งอีกครั้ง'); return; }
           it.id = data.id;
           markSent(it, name);
-          setState(it, 'wait', data.ai_ready ? 'ส่งแล้ว รอ AI วิเคราะห์' : 'ส่งแล้ว จะได้คะแนนเมื่อผู้ดูแลตั้งค่า AI');
+          it.stale = !!data.stale;
+          setState(it, 'wait', (data.ai_ready ? 'ส่งแล้ว รอ AI วิเคราะห์' : 'ส่งแล้ว จะได้คะแนนเมื่อผู้ดูแลตั้งค่า AI')
+            + (it.stale ? ' (ภาพนี้ถ่ายไว้นานแล้ว กรรมการจะเห็นหมายเหตุนี้)' : ''));
         });
       }).catch(function () {
         setState(it, 'fail', 'ส่งไม่สำเร็จ ตรวจสัญญาณอินเทอร์เน็ตแล้วกดส่งอีกครั้ง');

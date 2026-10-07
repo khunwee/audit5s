@@ -223,7 +223,8 @@ def test_02_schedules_default_department_camera():
     page = a.get("/admin/cameras").text
     assert "เวลา 07:30 และสุ่ม 3 ครั้งระหว่าง 10:00-12:00 (ทุกวัน)" in page and "(ตารางของกล้องนี้)" in page
     assert "(ปิดเฉพาะกล้องนี้)" in page and "(ค่ากลาง)" in page and "ตารางของแผนก: เวลา 08:00, 13:00" in page
-    assert rand[0] not in page                                               # หน้าเว็บไม่เปิดเผยเวลาสุ่ม
+    shown = page.replace("10:00-12:00", "")                                  # ช่วงเวลาที่ตั้งไว้แสดงได้ แต่เวลาสุ่มจริงต้องไม่แสดง
+    assert not any(t in shown for t in rand if t not in ("09:30", "14:30", "08:30", "16:30"))
     assert "ถ่ายอัตโนมัติตามตาราง 3 ตัว" in page                              # A1, A3 (ตามแผนก), B1
     # วันในสัปดาห์และวันหยุด
     a.post("/admin/cameras/schedule", data={"sched_times": "09:00", "sched_days": ["0", "1", "2", "3", "4"], "grace": 20,

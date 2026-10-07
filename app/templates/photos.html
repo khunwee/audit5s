@@ -16,6 +16,8 @@
     <option value="rejected"{{ ' selected' if status == 'rejected' }}>ภาพใช้ประเมินไม่ได้</option>
     <option value="error"{{ ' selected' if status == 'error' }}>วิเคราะห์ไม่สำเร็จ</option>
     <option value="unverified"{{ ' selected' if status == 'unverified' }}>ยังไม่มีคนยืนยัน</option>
+          <option value="appeal"{{ ' selected' if status == 'appeal' }}>แผนกขอทบทวน</option>
+          <option value="stale"{{ ' selected' if status == 'stale' }}>ภาพจากคลังที่ถ่ายไว้นานแล้ว</option>
     <option value="review"{{ ' selected' if status == 'review' }}>ควรให้กรรมการตรวจ</option>
     <option value="override"{{ ' selected' if status == 'override' }}>กรรมการปรับคะแนนแล้ว</option>
   </select></label>

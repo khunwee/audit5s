@@ -104,7 +104,8 @@ async def tv_admin_save(request: Request, user=Depends(admin_user), db=Depends(g
         "tv_rounds": num("tv_rounds", 6, 2, 12),
         "tv_round": form.get("tv_round") if form.get("tv_round") in ("auto", "open", "closed") else "auto",
         "tv_refresh_min": num("tv_refresh_min", 5, 1, 120), "tv_hours": _hours(form.get("tv_hours") or ""),
-        "tv_clock": form.get("tv_clock") == "1", "tv_unranked": form.get("tv_unranked") == "1"})
+        "tv_clock": form.get("tv_clock") == "1", "tv_unranked": form.get("tv_unranked") == "1",
+        "tv_group": (form.get("tv_group") or "").strip()[:60]})
     log(db, user, "save_tv_settings", f"หน้า: {', '.join(slides)}")
     db.commit()
     flash(request, "บันทึกการตั้งค่าจอแสดงผลแล้ว จอที่เปิดอยู่จะใช้ค่าใหม่เมื่อโหลดหน้าใหม่")

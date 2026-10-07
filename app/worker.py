@@ -155,6 +155,42 @@ def process_one() -> bool:
         return True
 
 
+def remind_departments(db) -> int:
+    """ก่อนวันสิ้นสุดรอบ: แจ้งแผนกที่ภาพยังไม่ครบ หรือยังขาดจุดตรวจบังคับ วันละครั้งต่อแผนก"""
+    from . import scoring
+    s = settings_store.load()
+    days = int(s.get("dept_remind_days", 3) or 0)
+    if days <= 0:
+        return 0
+    today = (now() + timedelta(hours=7)).date()
+    link = (s.get("public_url") or "").rstrip("/")
+    sent = 0
+    for rnd in db.query(Round).filter(Round.status == "open", Round.end_date.isnot(None)).all():
+        left = (rnd.end_date - today).days
+        if left < 0 or left > days:
+            continue
+        rk = scoring.round_ranking(db, rnd, with_prev=False)
+        for r in rk["unranked"] + rk["idle"]:
+            key = f"_stamp_remind_{rnd.id}_{r['dept'].id}"
+            if s.get(key) == today.isoformat():
+                continue
+            need = max(1, rnd.min_photos)
+            lines = [f"รอบ {rnd.name} จะปิดใน {left} วัน" if left else f"รอบ {rnd.name} ปิดวันนี้",
+                     f"แผนก {r['dept'].name} ยังไม่ถูกจัดอันดับ: นับคะแนนแล้ว {r['scored']} จากขั้นต่ำ {need} ภาพ"]
+            if r.get("unverified"):
+                lines.append(f"มี {r['unverified']} ภาพที่รอหัวหน้าหรือกรรมการยืนยัน")
+            if r.get("missing"):
+                lines.append("จุดตรวจบังคับที่ยังไม่มีภาพ: " + ", ".join(r["missing"][:8]))
+            if link:
+                lines.append(f"{link}/capture")
+            notify.emit(db, "round", round_id=rnd.id, department_id=r["dept"].id, payload={"action": "remind", "text": "\n".join(lines)})
+            settings_store.save(db, {key: today.isoformat()})
+            sent += 1
+    if sent:
+        db.commit()
+    return sent
+
+
 def housekeeping() -> dict:
     """งานดูแลประจำ (ทุก 6 ชั่วโมงขณะระบบทำงาน): ลบภาพตามนโยบาย ตรวจพื้นที่ เตือนให้สำรอง เตือนรอบใกล้ปิด"""
     from datetime import timedelta as _td
@@ -170,6 +206,7 @@ def housekeeping() -> dict:
         from . import rounds_auto, scheduler
         rounds_auto.ensure(db)
         out["cameras"] = scheduler.stale_cameras(db)
+        out["reminders"] = remind_departments(db)
         today = (now() + _td(hours=7)).date()
         out["closing"] = 0
         for rnd in db.query(Round).filter(Round.status == "open").all():

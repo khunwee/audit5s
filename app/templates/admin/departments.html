@@ -9,6 +9,7 @@
     <label class="field"><span>ชื่อแผนก</span><input type="text" name="name" value="{{ d.name if d }}" required maxlength="120" placeholder="เช่น ผลิต 1"></label>
   </div>
   <label class="field"><span>ชื่อภาษาอังกฤษ <em>ไม่บังคับ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ</em></span><input type="text" name="name_en" value="{{ d.name_en if d and d.name_en }}" maxlength="120" placeholder="เช่น Production 1"></label>
+  <label class="field"><span>กลุ่มสำหรับจัดอันดับ <em>ไม่บังคับ แผนกในกลุ่มเดียวกันมีอันดับในกลุ่ม เช่น ผลิต สนับสนุน สำนักงาน</em></span><input type="text" name="group_name" value="{{ d.group_name if d and d.group_name }}" maxlength="60" list="dept-groups" placeholder="เช่น ผลิต"></label>
   <label class="field"><span>อาคารหรือโซน <em>ไม่บังคับ</em></span><input type="text" name="zone" value="{{ d.zone if d }}" maxlength="120"></label>
   {% if d %}<label class="field"><span>สถานะ</span><select name="active"><option value="1"{{ ' selected' if d.active }}>ใช้งาน</option><option value="0"{{ ' selected' if not d.active }}>ปิดการใช้งาน</option></select></label>{% endif %}
   <fieldset class="perm-box"><legend>ตารางเวลาถ่ายอัตโนมัติของกล้องในแผนกนี้</legend>
@@ -24,6 +25,7 @@
 </form>
 {% endmacro %}
 {% block content %}
+<datalist id="dept-groups">{% for g in items|map(attribute='group_name')|select|unique|sort %}<option value="{{ g }}">{% endfor %}</datalist>
 <div class="page-head"><div><h1>แผนก</h1><p>แผนกที่เข้าร่วมกิจกรรม 5ส และถูกนำมาจัดอันดับ</p></div></div>
 {% include "admin/_nav.html" %}
 <section class="panel">

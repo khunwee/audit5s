@@ -4,6 +4,9 @@
 <div class="page-head"><div><h1>จัดการระบบ</h1></div></div>
 {% include "admin/_nav.html" %}
 <div class="stack">
+  {% if user.role == 'admin' and not settings.preset %}
+  <p class="note blue"><b>ยังไม่ได้เลือกชุดตั้งค่าเริ่มต้น</b> เลือกชุด โรงงาน หรือ สำนักงาน เพื่อให้ระบบตั้งหมวด รายการตรวจ และค่าที่แนะนำให้ครบในครั้งเดียว <a href="/admin/setup">ไปหน้า เริ่มต้นใช้งาน</a></p>
+  {% endif %}
   {% if user.role == 'admin' and (n_depts == 0 or open_rounds == 0 or not ai_ready) %}
   <section class="panel panel-line">
     <h2>ขั้นตอนเริ่มใช้งาน</h2>

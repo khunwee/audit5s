@@ -259,6 +259,7 @@ EN = {
  "พื้นที่และสำรองข้อมูล": "Storage and backup",
  "บันทึกการใช้งาน": "Activity log",
  "จอแสดงผล": "TV display",
+ "เริ่มต้นใช้งาน": "Getting started",
  "ตัวแทนแผนก": "Department member",
  "กรรมการตรวจ": "Auditor",
  "ผู้ดูแลระบบ": "Administrator"

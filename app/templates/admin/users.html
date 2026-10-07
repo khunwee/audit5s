@@ -50,6 +50,7 @@
       {% if u.role != 'admin' and (u.perms or u.extra_depts) %} <span class="chip chip-pending">ตั้งสิทธิ์เฉพาะบัญชี</span>{% endif %}</span>
       <span class="muted">{{ 'เข้าล่าสุด ' ~ (u.last_login|dt) if u.last_login else 'ยังไม่เคยเข้า' }}</span></summary>
     {{ form(u) }}
+    {% if u.id != user.id %}<form method="post" action="/admin/users/{{ u.id }}/delete" data-confirm="ลบบัญชี {{ u.username }} ภาพที่บัญชีนี้เคยส่งยังอยู่ในระบบ" style="padding:0 4px 14px"><button class="btn small danger">ลบบัญชีนี้</button></form>{% endif %}
   </details>
   {% endfor %}
   <details class="edit add"><summary>เพิ่มผู้ใช้</summary>

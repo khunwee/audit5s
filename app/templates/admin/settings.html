@@ -52,6 +52,11 @@
       </select></label>
     <label class="check"><input type="checkbox" name="member_see_all" value="1"{{ ' checked' if s.member_see_all }}><span>ให้ตัวแทนแผนกดูภาพและผลคะแนนของแผนกอื่นได้ <em class="muted">(ช่วยให้เห็นตัวอย่างที่ดีและตรวจสอบความยุติธรรมกันเองได้)</em></span></label>
     <label class="check"><input type="checkbox" name="allow_gallery" value="1"{{ ' checked' if s.allow_gallery }}><span>ให้เลือกรูปจากคลังภาพในเครื่องได้ <em class="muted">(ปิดไว้ = มีเฉพาะปุ่มถ่ายจากกล้อง ลดการใช้รูปเก่า)</em></span></label>
+    <div class="grid-2">
+      <label class="field"><span>ภาพจากคลังภาพต้องถ่ายไว้ไม่เกินกี่ชั่วโมง <em>0 = ไม่ตรวจ ระบบอ่านเวลาถ่ายจากไฟล์ภาพ</em></span><input type="number" name="gallery_max_age_h" value="{{ s.gallery_max_age_h }}" min="0" max="8760"></label>
+      <label class="field"><span>ภาพที่ถ่ายไว้นานเกินกำหนด</span><select name="gallery_stale"><option value="flag"{{ ' selected' if s.gallery_stale != 'reject' }}>รับ แต่ติดป้ายให้กรรมการเห็น</option><option value="reject"{{ ' selected' if s.gallery_stale == 'reject' }}>ไม่รับ ให้ถ่ายใหม่</option></select></label>
+      <label class="field"><span>เตือนแผนกที่ภาพยังไม่ครบ ก่อนวันสิ้นสุดรอบกี่วัน <em>0 = ไม่เตือน ส่งไปยังช่องทางของแผนกที่รับเรื่องเปิดและปิดรอบ</em></span><input type="number" name="dept_remind_days" value="{{ s.dept_remind_days }}" min="0" max="30"></label>
+    </div>
   </section>
 
   <section class="panel">

@@ -424,3 +424,16 @@ table.trend th a { color: inherit; }
 /* ---------- รุ่น 1.4: ปุ่มเปลี่ยนภาษา ---------- */
 .lang-switch { display: inline-block; font: 600 .86rem/1 var(--display); padding: 7px 10px; border: 1.5px solid var(--line); border-radius: var(--r); color: var(--ink); text-decoration: none; background: var(--paper); margin-right: 8px; white-space: nowrap; }
 .lang-switch:hover { border-color: var(--ink); }
+
+/* ---------- รุ่น 1.6: แถวที่กางออกเพื่อดูอย่างเดียว ---------- */
+details.edit.peek > summary::after { content: "ดู"; }
+details.edit.peek[open] > summary::after { content: "ปิด"; }
+
+/* ---------- รุ่น 1.7: ป้าย QR ของจุดตรวจ ---------- */
+.qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.qr-card { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: center; padding: 14px; background: var(--paper); border: 2px solid var(--ink); border-radius: var(--r); break-inside: avoid; }
+.qr-code svg { display: block; width: 132px; height: 132px; }
+.qr-card h2 { font-size: 1.15rem; margin: 2px 0; overflow-wrap: anywhere; }
+.qr-dept { margin: 0; font: 600 .86rem var(--display); color: var(--ink-2); }
+.qr-how { margin: 8px 0 0; font-size: .86rem; border-top: 3px solid var(--tape); padding-top: 6px; }
+@media print { .qr-sheet { grid-template-columns: repeat(2, 1fr); gap: 8mm; } .qr-card { border-width: 1.5pt; } }

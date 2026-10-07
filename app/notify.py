@@ -158,6 +158,9 @@ def build(db, kind: str, round_id, dept_id, events: list):
                     data=dict(event="action", department=dname))
     if kind == "round":
         action = first.get("action")
+        if action == "remind":                 # เตือนแผนกที่ยังส่งไม่ครบก่อนปิดรอบ
+            return dict(title="[5ส Vision] ใกล้ปิดรอบ ภาพยังไม่ครบ", text=first.get("text", ""),
+                        data=dict(event="round", action=action, round=rname, department=dname))
         if action == "open":
             text = f"เปิดรอบการตรวจ: {rname}\nเริ่มส่งภาพได้แล้ว"
             if rnd and rnd.end_date:

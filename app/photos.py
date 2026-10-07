@@ -1,10 +1,12 @@
 """รับภาพเข้าระบบ: ทุกแหล่ง (มือถือ เว็บแคม กล้อง IP โปรแกรมกล้อง) ผ่านจุดเดียวกัน จึงใช้กติกาชุดเดียวกัน"""
+from datetime import datetime, timedelta
+
 from fastapi import HTTPException
 
 from . import config, imaging, notify, storage, worker
 from sqlalchemy import func
 
-from .db import AuditArea, Photo, PhotoImage, PhotoThumb, Round
+from .db import AuditArea, Photo, PhotoImage, PhotoThumb, Round, now
 
 SOURCES = {"mobile": "กล้องมือถือ", "gallery": "คลังภาพ", "webcam": "เว็บแคม", "ipcam": "กล้อง IP",
            "agent": "กล้อง IP (โปรแกรมในโรงงาน)"}
@@ -19,9 +21,21 @@ def area_label(value: str) -> str:
     return config.AREA_TYPES.get(value, value or "-")
 
 
+def parse_shot_at(text: str):
+    """เวลาที่ถ่ายภาพที่เครื่องของผู้ส่งอ่านได้จากไฟล์ (เวลาไทย) คืน None ถ้าไม่มีหรือไม่สมเหตุผล"""
+    try:
+        taken = datetime.strptime((text or "").strip()[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+    local = now() + timedelta(hours=7)
+    if taken > local + timedelta(hours=14) or taken.year < 2005:        # นาฬิกาของกล้องผิดชัดเจน: ถือว่าไม่ทราบ
+        return None
+    return taken
+
+
 def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, area_name: str, area_type: str = "",
                  note: str = "", uploader_id=None, uploader_name: str = "", source: str = "mobile",
-                 camera_id=None, after_of=None, area_id=None, enforce_area: bool = False) -> Photo:
+                 camera_id=None, after_of=None, area_id=None, enforce_area: bool = False, shot_at: str = "") -> Photo:
     if rnd is None or rnd.status != "open":
         raise HTTPException(400, "รอบการตรวจนี้ปิดรับภาพแล้ว")
     # จุดตรวจ: ใช้จุดที่โรงงานกำหนดก่อนเสมอ (เลือกจากรายการ หรือชื่อตรงกัน) จุดที่พิมพ์เองรับเมื่อผู้ดูแลอนุญาต
@@ -61,8 +75,17 @@ def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, are
         before = db.get(Photo, int(after_of))
         if before is None or before.department_id != department_id:
             raise HTTPException(400, "ภาพก่อนแก้ไขที่อ้างถึงไม่ใช่ของแผนกนี้")
+    taken, stale = parse_shot_at(shot_at), False
+    limit = int(s.get("gallery_max_age_h", 0) or 0)
+    if source == "gallery" and limit > 0 and taken is not None:
+        age_h = (now() + timedelta(hours=7) - taken).total_seconds() / 3600
+        if age_h > limit:
+            if s.get("gallery_stale", "flag") == "reject":
+                raise HTTPException(400, f"ภาพนี้ถ่ายไว้เมื่อ {taken.strftime('%d/%m/%Y %H:%M')} ซึ่งเกิน {limit} ชั่วโมง "
+                                         "ถ่ายภาพใหม่ด้วยปุ่ม ถ่ายภาพ")
+            stale = True
     allowed = set(area_types(s)) | set(config.AREA_TYPES)
-    p = Photo(round_id=rnd.id, department_id=department_id, uploader_id=uploader_id, uploader_name=uploader_name[:120],
+    p = Photo(shot_at=taken, stale=stale,round_id=rnd.id, department_id=department_id, uploader_id=uploader_id, uploader_name=uploader_name[:120],
               area_name=area_name, area_type=area_type if area_type in allowed else area_types(s)[-1],
               note=(note or "").strip()[:1000], sha256=img["sha256"], width=img["width"], height=img["height"],
               image_bytes=len(img["image"]), thumb_bytes=len(img["thumb"]), status="pending",

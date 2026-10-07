@@ -66,6 +66,7 @@
       if (k === 'rows' && +v) out.rows = +v;
       if (k === 'rounds' && +v) out.rounds = +v;
       if (k === 'slides' && v) out.slides = v.split(',');
+      if (k === 'group') out.group = v;
     }
     return out;
   }
@@ -326,7 +327,7 @@
   function chrome() {
     document.documentElement.lang = cfg.lang;
     document.body.className = document.body.className.replace(/theme-\w+/, 'theme-' + cfg.theme);
-    $('tv-title').textContent = cfg.lang === 'en' ? (cfg.title_en || cfg.title) : cfg.title;
+    $('tv-title').textContent = (cfg.lang === 'en' ? (cfg.title_en || cfg.title) : cfg.title) + (cfg.group ? '  ·  ' + cfg.group : '');
     $('tv-lang').textContent = cfg.lang === 'en' ? 'ไทย' : 'EN';
     $('tv-clock').style.display = cfg.clock ? '' : 'none';
     var r = data && data.round;
@@ -386,12 +387,26 @@
       if (x.status !== 200) { fail(); return; }
       var fresh;
       try { fresh = JSON.parse(x.responseText); } catch (e) { fail(); return; }
+      fresh = byGroup(fresh);
       var changed = !data || JSON.stringify(fresh) !== JSON.stringify(data);
       data = fresh; offline = false; lastOk = data.generated;
       if (changed) { var keep = index; build(); show(Math.min(keep, Math.max(0, slides.length - 1))); } else chrome();
     };
     x.onerror = x.ontimeout = fail;
     x.send();
+  }
+  // แสดงเฉพาะกลุ่มที่ตั้งไว้: ใช้อันดับภายในกลุ่ม และตัดแผนกนอกกลุ่มออกจากทุกหน้า
+  function byGroup(d) {
+    var g = cfg.group || '';
+    if (!g || !d.rows) return d;
+    var keep = function (x) { return (x.group || '') === g; }, i;
+    d.rows = d.rows.filter(keep);
+    for (i = 0; i < d.rows.length; i++) { d.rows[i].rank_all = d.rows[i].rank; d.rows[i].rank = d.rows[i].group_rank || d.rows[i].rank; d.rows[i].rank_delta = null; }
+    d.history.series = d.history.series.filter(keep);
+    for (i = 0; i < d.history.series.length; i++) d.history.series[i].rank = d.history.series[i].rank.map(function () { return null; });
+    d.unranked = [];
+    d.group = g;
+    return d;
   }
   function fail() { offline = true; if (data) chrome(); else stage.innerHTML = '<p class="tv-msg">' + t('loading') + '</p>'; }
 

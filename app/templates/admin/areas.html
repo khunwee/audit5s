@@ -21,7 +21,8 @@
 </form>
 {% endmacro %}
 {% block content %}
-<div class="page-head"><div><h1>จุดตรวจ</h1><p>โรงงานเป็นผู้กำหนดว่าแต่ละแผนกต้องถ่ายจุดใด และมาตรฐานของจุดนั้นคืออะไร</p></div></div>
+<div class="page-head"><div><h1>จุดตรวจ</h1><p>โรงงานเป็นผู้กำหนดว่าแต่ละแผนกต้องถ่ายจุดใด และมาตรฐานของจุดนั้นคืออะไร</p></div>
+  <div class="actions"><a class="btn" href="/admin/areas/qr" target="_blank" rel="noopener">พิมพ์ป้าย QR ของจุดตรวจ</a></div></div>
 {% include "admin/_nav.html" %}
 <div class="stack">
   <p class="note blue">เมื่อแผนกมีจุดตรวจที่กำหนดแล้ว หน้าถ่ายภาพจะให้เลือกจากรายการนี้

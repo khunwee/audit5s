@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}ป้าย QR ของจุดตรวจ{% endblock %}
+{% block content %}
+<div class="page-head no-print"><div><h1>ป้าย QR ของจุดตรวจ</h1><p>พิมพ์แล้วติดที่จุดตรวจ ผู้ส่งภาพสแกนด้วยกล้องมือถือ ระบบจะเปิดหน้าถ่ายภาพและเลือกแผนกกับจุดตรวจให้เอง</p></div>
+  <div class="actions"><button class="btn primary" type="button" onclick="window.print()">พิมพ์</button><a class="btn" href="/admin/areas">กลับไปหน้าจุดตรวจ</a></div></div>
+<form method="get" class="filters no-print" style="margin-bottom:12px">
+  <label class="field"><span>แผนก</span><select name="dept" onchange="this.form.submit()"><option value="0">ทุกแผนก</option>{% for d in depts %}<option value="{{ d.id }}"{{ ' selected' if dept == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+</form>
+{% if not cards %}<div class="empty"><h2>ยังไม่มีจุดตรวจ</h2><p>กำหนดจุดตรวจของแต่ละแผนกก่อน แล้วกลับมาพิมพ์ป้าย</p></div>{% endif %}
+{% if base.startswith('http://127.') or base.startswith('http://localhost') %}<p class="note no-print">ที่อยู่เว็บของระบบยังเป็นของเครื่องนี้ ({{ base }}) มือถือเครื่องอื่นจะเปิดไม่ได้ ตั้ง ที่อยู่เว็บของระบบ ที่หน้า ตั้งค่าและ AI ก่อนพิมพ์</p>{% endif %}
+<div class="qr-sheet">
+  {% for c in cards %}
+  <article class="qr-card">
+    <div class="qr-code">{{ c.svg|safe }}</div>
+    <div><p class="qr-dept">{{ c.dept.name }}</p><h2>{{ c.area.name }}</h2><p class="muted">{{ c.area.area_type }}{{ ', จุดตรวจบังคับ' if c.area.required }}</p>
+      <p class="qr-how">สแกนเพื่อถ่ายภาพ 5ส ของจุดนี้</p></div>
+  </article>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -183,12 +183,13 @@ def _csv(rows: list) -> bytes:
 def ranking_csv(db, rnd: Round) -> bytes:
     rk = scoring.round_ranking(db, rnd)
     rows = [["อันดับ", "รหัสแผนก", "แผนก", "คะแนนเฉลี่ย (%)", "ภาพที่ให้คะแนน", "ภาพทั้งหมด", "ต่ำสุด (%)", "สูงสุด (%)",
-             "เทียบรอบก่อน", "จุดตรวจบังคับ", "จุดตรวจที่ส่งแล้ว"] + [f"{c['name']} (%)" for c in rk["rubric"]] + ["สถานะ"]]
+             "เทียบรอบก่อน", "จุดตรวจบังคับ", "จุดตรวจที่ส่งแล้ว"] + [f"{c['name']} (%)" for c in rk["rubric"]]
+            + ["กลุ่ม", "อันดับในกลุ่ม", "สถานะ"]]
     for group, label in (("ranked", "จัดอันดับแล้ว"), ("unranked", "ภาพยังไม่ครบ"), ("idle", "ยังไม่ส่งภาพ")):
         for r in rk[group]:
             rows.append([r["rank"] or "", r["dept"].code, r["dept"].name, r["avg"], r["scored"], r["total"], r["low"],
                          r["high"], r["delta"], r["areas_required"], r["areas_covered"]]
-                        + [r["crit"].get(c["code"]) for c in rk["rubric"]] + [label])
+                        + [r["crit"].get(c["code"]) for c in rk["rubric"]] + [r.get("group") or "", r.get("group_rank") or "", label])
     return _csv([["" if v is None else v for v in row] for row in rows])
 
 

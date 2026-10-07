@@ -25,6 +25,7 @@
         <option value="auto"{{ ' selected' if s.tv_round == 'auto' }}>ตามการตั้งค่าการเปิดเผยอันดับ</option>
         <option value="open"{{ ' selected' if s.tv_round == 'open' }}>รอบที่เปิดอยู่ (คะแนนเปลี่ยนตามภาพที่ส่ง)</option>
         <option value="closed"{{ ' selected' if s.tv_round == 'closed' }}>รอบที่ปิดล่าสุด (ผลสุดท้าย)</option></select></label>
+      <label class="field"><span>แสดงเฉพาะกลุ่ม <em>ว่าง = ทุกแผนก ตั้งกลุ่มของแผนกที่หน้า แผนก หรือต่อท้ายลิงก์ด้วย &amp;group=ชื่อกลุ่ม</em></span><input type="text" name="tv_group" value="{{ s.tv_group }}" maxlength="60"></label>
       <label class="field"><span>จำนวนรอบย้อนหลังในกราฟ</span><input type="number" name="tv_rounds" value="{{ s.tv_rounds }}" min="2" max="12"></label>
       <label class="field"><span>เวลาต่อหนึ่งหน้า (วินาที)</span><input type="number" name="tv_seconds" value="{{ s.tv_seconds }}" min="5" max="300"></label>
       <label class="field"><span>จำนวนแผนกต่อหน้า</span><input type="number" name="tv_rows" value="{{ s.tv_rows }}" min="3" max="20"></label>

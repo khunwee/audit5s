@@ -18,6 +18,7 @@
         <dt>แหล่งภาพ</dt><dd>{{ SOURCES.get(p.source or 'mobile', '-') }}</dd>
         <dt>ผู้ส่ง</dt><dd>{{ p.uploader_name or '-' }}</dd>
         <dt>ส่งเมื่อ</dt><dd>{{ p.created_at|dt }}</dd>
+        {% if p.shot_at %}<dt>ถ่ายเมื่อ</dt><dd>{{ p.shot_at.strftime('%d/%m/%Y %H:%M') }}{% if p.stale %} <span class="chip chip-error">ถ่ายไว้นานแล้ว</span>{% endif %}</dd>{% endif %}
         {% if p.note %}<dt>หมายเหตุ</dt><dd>{{ p.note }}</dd>{% endif %}
         {% if p.analyzed_at %}<dt>วิเคราะห์เมื่อ</dt><dd>{{ p.analyzed_at|dt }}</dd><dt>โมเดล</dt><dd>{{ p.model or '-' }}</dd>{% endif %}
         {% if p.verified_at %}<dt>ยืนยันผล</dt><dd>{{ p.verified_by }} เมื่อ {{ p.verified_at|dt }}</dd>{% elif p.status == 'done' %}<dt>ยืนยันผล</dt><dd>ยังไม่มีคนยืนยัน</dd>{% endif %}
@@ -50,6 +51,35 @@
       <div class="crit"><h3>ควรทำก่อน</h3><ol class="todo">{% for x in a.top_actions %}<li>{{ x }}</li>{% endfor %}</ol></div>
       {% endif %}
     </section>
+
+    {% if p.appeal_status or (can_fix and p.status in ('done', 'rejected')) %}
+    <section class="panel no-print" id="appeal"{% if p.appeal_status == 'open' %} style="border-color:var(--tape);border-width:2px"{% endif %}>
+      <h2>ขอทบทวนผล</h2>
+      {% if p.appeal_status %}
+      <p><span class="chip {{ 'chip-pending' if p.appeal_status == 'open' else 'chip-done' }}">{{ 'รอกรรมการทบทวน' if p.appeal_status == 'open' else 'ทบทวนแล้ว' }}</span>
+        <span class="muted">ขอโดย {{ p.appeal_by }} เมื่อ {{ p.appeal_at|dt }}</span></p>
+      <p style="white-space:pre-line"><b>เหตุผลของแผนก</b>
+{{ p.appeal_note }}</p>
+      {% if p.appeal_status == 'resolved' %}<p style="white-space:pre-line"><b>คำตอบของกรรมการ</b> <span class="muted">{{ p.appeal_closed_by }}, {{ p.appeal_closed_at|dt }}</span>
+{{ p.appeal_reply }}</p>{% endif %}
+      {% endif %}
+      {% if p.appeal_status == 'open' and can(user, 'score') %}
+        {% if can_verify %}
+        <form method="post" action="/admin/photos/{{ p.id }}/appeal-reply">
+          <label class="field"><span>คงผลเดิม: คำอธิบายถึงแผนก</span><textarea name="reply" required minlength="5" maxlength="1000" placeholder="เช่น ในภาพยังเห็นกล่องวางในทางเดินด้านซ้าย"></textarea></label>
+          <button class="btn small">ตอบและคงผลเดิม</button>
+        </form>
+        <p class="muted" style="margin-top:6px">ถ้าเห็นด้วยกับแผนก ใช้ ปรับคะแนนด้วยกรรมการ ด้านล่าง เหตุผลที่ปรับจะเป็นคำตอบถึงแผนก</p>
+        {% else %}<p class="note">ภาพนี้คุณเป็นผู้ส่ง จึงต้องให้กรรมการคนอื่นทบทวน</p>{% endif %}
+      {% elif p.appeal_status != 'open' and can_fix and p.status in ('done', 'rejected') %}
+      <details class="edit add"><summary>{{ 'ขอทบทวนอีกครั้ง' if p.appeal_status else 'เห็นว่าผลไม่ตรงกับสภาพจริง ขอให้กรรมการทบทวน' }}</summary>
+        <form method="post" action="/photos/{{ p.id }}/appeal">
+          <label class="field"><span>ผลข้อใดไม่ตรง และเพราะอะไร</span><textarea name="note" required minlength="10" maxlength="1000" placeholder="เช่น ข้อ C04: กล่องที่เห็นอยู่ในพื้นที่วางของ ไม่ได้อยู่ในทางเดิน"></textarea></label>
+          <button class="btn small primary">ส่งคำขอทบทวน</button>
+        </form></details>
+      {% endif %}
+    </section>
+    {% endif %}
 
     {% if can(user, 'score') %}
     <section class="panel no-print">

@@ -55,6 +55,7 @@ class Department(Base):
     created_at = Column(DateTime, default=now)
     name_en = Column(String(120), default="")           # ชื่อภาษาอังกฤษ ใช้บนจอแสดงผลและหน้าจอภาษาอังกฤษ
     cam_schedule = Column(JSON, nullable=True)          # ตารางเวลาถ่ายอัตโนมัติของกล้องในแผนกนี้ (ว่าง = ใช้ค่ากลาง)
+    group_name = Column(String(60), default="")         # กลุ่มสำหรับจัดอันดับแยกกลุ่ม เช่น ผลิต สนับสนุน สำนักงาน
 
 
 
@@ -199,6 +200,15 @@ class Photo(Base):
     area_id = Column(Integer, nullable=True)            # จุดตรวจที่โรงงานกำหนด (ว่าง = จุดที่พิมพ์ชื่อเอง)
     verified_by = Column(String(120), default="")       # หัวหน้าหรือกรรมการที่ดูภาพแล้วยืนยันผล
     verified_at = Column(DateTime, nullable=True)
+    shot_at = Column(DateTime, nullable=True)           # เวลาที่ถ่ายภาพตามข้อมูลของไฟล์ (เวลาไทย) ถ้าเครื่องของผู้ส่งบอกได้
+    stale = Column(Boolean, default=False)              # ภาพจากคลังภาพที่ถ่ายไว้นานเกินกำหนด
+    appeal_status = Column(String(10), default="")      # การขอทบทวนผลของแผนก: ว่าง | open | resolved
+    appeal_note = Column(Text, default="")
+    appeal_by = Column(String(120), default="")
+    appeal_at = Column(DateTime, nullable=True)
+    appeal_reply = Column(Text, default="")
+    appeal_closed_by = Column(String(120), default="")
+    appeal_closed_at = Column(DateTime, nullable=True)
     department = relationship("Department", lazy="joined")
 
     __table_args__ = (Index("ix_photos_round_sha", "round_id", "sha256"),)

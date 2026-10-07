@@ -7,6 +7,26 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 Image.MAX_IMAGE_PIXELS = 60_000_000
 _ALLOWED = {"JPEG", "PNG", "WEBP", "MPO"}
 
+# ภาพ HEIC/HEIF ของมือถือ: iPhone แปลงเป็น JPEG ให้เองตอนส่งผ่านเว็บ และหน้าเว็บของระบบแปลงซ้ำอีกชั้นก่อนส่ง
+# ไฟล์ HEIC จึงมาถึงเซิร์ฟเวอร์เฉพาะเมื่อเบราว์เซอร์แปลงไม่ได้ (เช่น เลือกภาพ HEIF จากคลังภาพบน Android)
+# ถ้าติดตั้งแพ็กเกจ pillow-heif ไว้ เซิร์ฟเวอร์จะเปิดไฟล์แบบนี้ได้เอง ถ้าไม่ได้ติดตั้ง จะบอกผู้ใช้ว่าต้องทำอย่างไร
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HEIF = True
+    _ALLOWED |= {"HEIF", "HEIC"}
+except Exception:                                    # ไม่ได้ติดตั้ง หรือเครื่องนี้ใช้ไม่ได้: ระบบทำงานต่อได้ตามปกติ
+    HEIF = False
+_HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1", b"heif")
+
+
+def looks_heif(raw: bytes) -> bool:
+    return len(raw) > 12 and raw[4:8] == b"ftyp" and raw[8:12] in _HEIF_BRANDS
+
+
+HEIF_HINT = ("ภาพนี้เป็นไฟล์ HEIC ซึ่งเบราว์เซอร์ของเครื่องนี้แปลงเป็น JPEG ไม่ได้ ใช้ปุ่ม ถ่ายภาพ แทนการเลือกจากคลังภาพ "
+             "หรือตั้งกล้องของมือถือให้บันทึกเป็น JPEG")
+
 
 class ImageError(Exception):
     pass
@@ -30,9 +50,11 @@ def process(raw: bytes, max_side: int = 1280, quality: int = 78) -> dict:
         img = Image.open(io.BytesIO(raw))
         img.load()
     except Exception:
+        if looks_heif(raw) and not HEIF:
+            raise ImageError(HEIF_HINT)
         raise ImageError("เปิดไฟล์ภาพไม่ได้ รองรับ JPG, PNG และ WEBP")
     if fmt not in _ALLOWED:
-        raise ImageError("รองรับเฉพาะไฟล์ภาพ JPG, PNG และ WEBP")
+        raise ImageError(HEIF_HINT if looks_heif(raw) else "รองรับเฉพาะไฟล์ภาพ JPG, PNG และ WEBP")
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         bg = Image.new("RGB", img.size, (255, 255, 255))

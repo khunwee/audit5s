@@ -59,7 +59,7 @@ pip install pytest
 pytest -q
 ```
 
-ควรได้ `62 passed`
+ควรได้ `76 passed`
 
 ## ส่วน C นำโค้ดขึ้น GitHub
 
@@ -70,7 +70,7 @@ pytest -q
 cd C:\Projects\fives-vision
 git init
 git add .
-git commit -m "5S Vision 1.5.0"
+git commit -m "5S Vision 1.7.0"
 git branch -M main
 git remote add origin https://github.com/ชื่อบัญชี/fives-vision.git
 git push -u origin main
@@ -146,13 +146,13 @@ postgresql://neondb_owner:xxxxxxxx@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/n
 
 1. เปิดลิงก์ `https://ชื่อบริการ.onrender.com`
 2. เข้าสู่ระบบด้วย `admin` กับรหัสใน `ADMIN_PASSWORD` ระบบจะให้ตั้งรหัสผ่านใหม่ทันที
-3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.5.0"}`
+3. ตรวจว่าระบบทำงาน: เปิด `https://ชื่อบริการ.onrender.com/healthz` ควรเห็น `{"ok":true,"version":"1.7.0"}`
 
 ถ้า build ไม่ผ่านหรือเปิดไม่ได้ ดูแท็บ Logs ของบริการ แล้วเทียบกับส่วน J
 
 ## ส่วน F ตั้งค่าระบบหลังขึ้น host
 
-ทำตามลำดับนี้ที่เมนู จัดการระบบ หน้า ภาพรวม จะแสดงรายการเดียวกันและบอกว่าข้อใดเสร็จแล้ว
+เริ่มที่ จัดการ > เริ่มต้นใช้งาน เลือกชุดตั้งค่า โรงงาน หรือ สำนักงาน ระบบจะตั้งหมวด รายการตรวจ ประเภทพื้นที่ และค่าที่แนะนำให้ จากนั้นทำข้อที่เหลือตามลำดับนี้ที่เมนู จัดการระบบ หน้า ภาพรวม จะแสดงรายการเดียวกันและบอกว่าข้อใดเสร็จแล้ว
 
 1. ตั้งค่าและ AI > ทั่วไป: ใส่ชื่อโรงงาน และตรวจช่อง ที่อยู่เว็บของระบบ ว่าเป็นลิงก์ onrender.com ของคุณ (ระบบเติมให้ตอนเข้าครั้งแรก)
 2. ตั้งค่าและ AI > AI หลัก: เลือก Google Gemini วาง API key จาก https://aistudio.google.com/apikey กด ดึงรายชื่อโมเดล เลือกรุ่นตระกูล Flash กด ทดสอบด้วยภาพตัวอย่าง แล้วกด บันทึกการตั้งค่า

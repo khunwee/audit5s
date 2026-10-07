@@ -42,12 +42,17 @@
   {% if not ranking.ranked %}
     <div class="empty"><h2>ยังไม่มีแผนกที่ถูกจัดอันดับ</h2><p>แผนกต้องมีภาพที่ให้คะแนนแล้วอย่างน้อย {{ rnd.min_photos }} ภาพ</p></div>
   {% else %}
+  {% if ranking.groups %}
+  <p class="actions no-print" style="margin-bottom:10px"><span class="muted">แสดง</span>
+    <a class="btn small{{ ' primary' if not group else ' quiet' }}" href="/ranking?round={{ rnd.id }}">ทุกแผนก</a>
+    {% for g in ranking.groups %}<a class="btn small{{ ' primary' if group == g else ' quiet' }}" href="/ranking?round={{ rnd.id }}&group={{ g|urlencode }}">กลุ่ม{{ g }}</a>{% endfor %}</p>
+  {% endif %}
   <ol class="rank-list">
     {% for r in ranking.ranked %}
-    <li><a class="rank-row{{ ' top' if r.rank <= 3 }}" href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">
-      <span class="rank-no">{{ r.rank }}</span>
+    <li>{% set shown = r.group_rank if group else r.rank %}<a class="rank-row{{ ' top' if shown <= 3 }}" href="/rounds/{{ rnd.id }}/dept/{{ r.dept.id }}">
+      <span class="rank-no">{{ shown }}</span>
       <span>
-        <span class="rank-name">{{ r.dept.name }}</span><br>
+        <span class="rank-name">{{ r.dept.name }}</span>{% if r.group and not group %} <span class="chip chip-plain">กลุ่ม{{ r.group }} อันดับ {{ r.group_rank }}</span>{% endif %}{% if group %} <span class="chip chip-plain">อันดับรวม {{ r.rank }}</span>{% endif %}<br>
         <span class="rank-sub">{{ r.scored }} ภาพ, ต่ำสุด {{ r.low|num }}% สูงสุด {{ r.high|num }}%
           {% if r.delta is not none %}<span class="{{ 'delta-up' if r.delta >= 0 else 'delta-down' }}">{{ 'เพิ่มขึ้น' if r.delta >= 0 else 'ลดลง' }} {{ r.delta|abs|num }} จากรอบก่อน</span>{% endif %}
           {% if r.overridden %}, กรรมการปรับ {{ r.overridden }} ภาพ{% endif %}{% if r.replaced %}, แก้ไขแล้ว {{ r.replaced }} จุด{% endif %}{% if r.areas_required %}, จุดตรวจบังคับ {{ r.areas_covered }}/{{ r.areas_required }}{% endif %}{% if r.unverified %}, รอยืนยัน {{ r.unverified }} ภาพ{% endif %}</span>

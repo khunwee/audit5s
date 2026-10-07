@@ -62,5 +62,18 @@
       <a class="btn" href="/admin/backup/system.json">ดาวน์โหลดข้อมูลทั้งระบบ</a>
     </section>
   </div>
+
+  {% if user.role == 'admin' %}
+  <section class="panel" style="border-color:var(--tag)">
+    <h2>ล้างข้อมูลทดสอบก่อนใช้งานจริง</h2>
+    <p>ลบข้อมูลการตรวจทั้งหมด: ทุกรอบ ทุกภาพ คะแนน งานแก้ไข สรุปของแผนก และประวัติการแจ้งเตือน <b>กู้คืนไม่ได้</b> ดาวน์โหลดไฟล์สำรองของรอบที่ต้องการเก็บก่อน</p>
+    <p class="muted">สิ่งที่ยังอยู่: การตั้งค่าและ API key, แผนก, จุดตรวจและโซน, หมวดและรายการตรวจ, ผู้ใช้และรหัสผ่าน, กล้องและตารางเวลา, ช่องทางแจ้งเตือน</p>
+    <form method="post" action="/admin/storage/wipe" data-confirm="ลบทุกรอบ ทุกภาพ และงานแก้ไขทั้งหมดออกจากระบบ กู้คืนไม่ได้">
+      <label class="field"><span>พิมพ์คำว่า <b>ลบข้อมูลทดสอบ</b> เพื่อยืนยัน</span><input type="text" name="confirm" autocomplete="off" required></label>
+      <label class="check"><input type="checkbox" name="logs" value="1"><span>ลบบันทึกการใช้งานเดิมด้วย <em class="muted">(ระบบจะบันทึกไว้ว่ามีการล้างข้อมูล โดยใคร เมื่อไร)</em></span></label>
+      <button class="btn danger">ลบข้อมูลการตรวจทั้งหมด</button>
+    </form>
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

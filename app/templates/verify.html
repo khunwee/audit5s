@@ -22,6 +22,9 @@
     <a href="/photos/{{ p.id }}/image" target="_blank" rel="noopener">{{ m.shot(p, '/photos/' ~ p.id ~ '/image') }}</a>
     <div>
       <div class="split"><div><h2>{{ p.area_name }}</h2><p class="muted" style="margin:0">{{ p.department.name }}, ภาพเลขที่ {{ p.id }}, ส่งโดย {{ p.uploader_name or '-' }} เมื่อ {{ p.created_at|dt }}</p></div>{{ m.tag(p.percent) }}</div>
+      {% if p.appeal_status == 'open' %}<p class="note" style="margin-top:8px;white-space:pre-line"><b>แผนกขอทบทวน</b> ({{ p.appeal_by }})
+{{ p.appeal_note }}</p>{% endif %}
+      {% if p.stale %}<p class="note red" style="margin-top:8px">ภาพจากคลังภาพ ถ่ายไว้เมื่อ {{ p.shot_at.strftime('%d/%m/%Y %H:%M') if p.shot_at }} ตรวจว่ายังตรงกับสภาพปัจจุบัน</p>{% endif %}
       {% if p.review_flag %}<p class="note" style="margin-top:8px">AI ประเมินสองรอบได้ผลต่างกันมาก ดูภาพนี้ให้ละเอียด</p>{% endif %}
       {% if a.summary %}<p style="margin-top:8px">{{ a.summary }}</p>{% endif %}
       {% if a.mode == 'checklist' %}

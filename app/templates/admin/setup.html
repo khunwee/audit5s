@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}เริ่มต้นใช้งาน{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>เริ่มต้นใช้งาน</h1><p>เลือกชุดตั้งค่าเริ่มต้นหนึ่งชุด ระบบตั้งส่วนที่เป็นมาตรฐานให้ แล้วเหลือเฉพาะข้อมูลของหน่วยงานที่ต้องใส่เอง</p></div></div>
+{% include "admin/_nav.html" %}
+<div class="stack">
+
+  <section class="panel panel-line">
+    <h2>โครงสร้างของการตั้งค่า</h2>
+    <p>ระบบให้คะแนนจาก 4 ชั้นนี้ ทุกชั้นแก้ได้ภายหลังที่หน้าของตัวเอง</p>
+    <div class="table-wrap"><table>
+      <tr><th>ชั้น</th><th>คืออะไร</th><th>ตัวอย่าง</th><th>แก้ที่</th><th>ชุดตั้งค่าทำให้</th></tr>
+      <tr><td><b>หมวด</b></td><td>หัวข้อใหญ่ของ 5ส และคะแนนเต็มของแต่ละหมวด</td><td>สะดวก เต็ม 20 คะแนน</td><td><a href="/admin/criteria">หมวดและคะแนนเต็ม</a></td><td>ใช่</td></tr>
+      <tr><td><b>รายการตรวจ</b></td><td>สภาพที่มองเห็นได้ 1 เรื่องต่อ 1 ข้อ AI ตอบว่า ผ่าน บกพร่องเล็กน้อย หรือบกพร่องมาก</td><td>ทางเดินโล่ง ไม่มีสิ่งของวาง: ผ่านได้ 5 แต้ม</td><td><a href="/admin/checkpoints">รายการตรวจ</a></td><td>ใช่</td></tr>
+      <tr><td><b>ประเภทพื้นที่</b></td><td>กลุ่มของพื้นที่ ใช้กำหนดว่าข้อใดใช้กับพื้นที่แบบใด</td><td>ข้อเรื่องพาเลทใช้กับคลังสินค้า ไม่ใช้กับสำนักงาน</td><td><a href="/admin/settings">ตั้งค่าและ AI</a></td><td>ใช่</td></tr>
+      <tr><td><b>จุดตรวจ</b></td><td>จุดที่แต่ละแผนกต้องถ่าย และมาตรฐานของจุดนั้น</td><td>ชั้นวาง Jig หน้า Line 3</td><td><a href="/admin/areas">จุดตรวจ</a></td><td>ไม่ เป็นข้อมูลของหน่วยงาน</td></tr>
+    </table></div>
+    <p class="muted" style="margin-top:8px">คะแนนของหมวด = คะแนนเต็มของหมวด x แต้มที่ได้ / แต้มเต็มของข้อที่ประเมินได้ในภาพนั้น หมวด สร้างนิสัย ระบบคำนวณเองจากข้อที่พบซ้ำและงานแก้ไขที่เกินกำหนด</p>
+  </section>
+
+  <section>
+    <h2 style="margin-bottom:8px">เลือกชุดตั้งค่าเริ่มต้น</h2>
+    {% if s.preset %}<p class="note blue">ตอนนี้ใช้ชุด <b>{{ 'โรงงาน' if s.preset == 'factory' else 'สำนักงาน' }}</b> มีรายการตรวจที่เปิดใช้ {{ n_checks }} ข้อ เลือกชุดอื่นหรือใช้ชุดเดิมซ้ำเพื่อคืนค่าได้</p>{% endif %}
+    <div class="cols cols-2">
+      {% for p in previews %}
+      <section class="panel"{% if s.preset == p.key %} style="border-color:var(--go);border-width:2px"{% endif %}>
+        <div class="split"><h2>ชุด{{ p.name }}</h2>{% if s.preset == p.key %}<span class="chip chip-done">ใช้อยู่</span>{% endif %}</div>
+        <p>สำหรับ{{ p.summary }}</p>
+        <dl class="facts">
+          <div><dt>หมวด</dt><dd>5 หมวด หมวดละ 20</dd></div>
+          <div><dt>รายการตรวจ</dt><dd>{{ p.n_checks }} ข้อ</dd></div>
+          <div><dt>ประเภทพื้นที่</dt><dd>{{ p.area_types|length }}</dd></div>
+        </dl>
+        <details class="edit peek" style="margin-top:10px"><summary><b>ดูรายการตรวจทั้ง {{ p.n_checks }} ข้อ</b></summary>
+          <div class="inner">
+          {% for c in p.categories %}
+          <h3 style="margin:12px 0 4px">{{ c.name }}</h3>
+          {% if c.kind == 'sustain' %}<p class="muted">ระบบคำนวณเอง ไม่ใช้รายการตรวจ</p>{% endif %}
+          <ul class="checks">{% for k in c.checks %}
+            <li class="ck" style="grid-template-columns:3.4rem 1fr auto"><b>{{ k.code }}</b>
+              <span class="ck-body">{{ k.text }}{% if k.types %} <span class="chip chip-plain">{{ k.types|join(', ') }}</span>{% endif %}<br><span class="muted">เล็กน้อย: {{ k.minor }}<br>มาก: {{ k.major }}</span></span>
+              <span class="num">{{ k.points|num }}</span></li>{% endfor %}</ul>
+          {% endfor %}
+          </div></details>
+        <details class="edit peek"><summary><b>ดูประเภทพื้นที่และค่าที่แนะนำ</b></summary>
+          <div class="inner">
+            <p><b>ประเภทพื้นที่</b> {{ p.area_types|join(', ') }}</p>
+            <ul>{% for key, text in labels %}<li>{{ text }}</li>{% endfor %}</ul>
+            <p class="muted" style="white-space:pre-line"><b>คำแนะนำถึง AI</b>
+{{ p.ai_extra }}</p>
+          </div></details>
+        <form method="post" action="/admin/setup/apply" style="margin-top:12px"
+              data-confirm="ใช้ชุด{{ p.name }}: สิ่งที่ติ๊กไว้จะถูกแทนที่ด้วยค่าของชุดนี้{{ ' รอบที่เปิดอยู่ยังใช้เกณฑ์ชุดเดิมจนกว่าจะกด ใช้เกณฑ์ล่าสุดกับรอบนี้' if n_rounds }}">
+          <input type="hidden" name="preset" value="{{ p.key }}">
+          <label class="check"><input type="checkbox" name="rules" value="1" checked><span>หมวดและรายการตรวจ <em class="muted">(แทนที่รายการตรวจทั่วไปที่มีอยู่ โซนของจุดตรวจไม่ถูกแตะ)</em></span></label>
+          <label class="check"><input type="checkbox" name="settings" value="1" checked><span>ประเภทพื้นที่และการตั้งค่าที่แนะนำ</span></label>
+          <button class="btn primary">ใช้ชุด{{ p.name }}</button>
+        </form>
+      </section>
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin-top:8px">ชุดตั้งค่าไม่แตะชื่อโรงงาน API key แผนก ผู้ใช้ จุดตรวจ โซน กล้อง ช่องทางแจ้งเตือน รอบการตรวจ และภาพ โรงงานที่มีสำนักงานอยู่ด้วยใช้ชุดโรงงาน ซึ่งมีข้อสำหรับประเภทพื้นที่ สำนักงานในโรงงาน อยู่แล้ว</p>
+  </section>
+
+  <section class="panel">
+    <h2>สิ่งที่ต้องทำเอง</h2>
+    <p class="muted">4 ข้อแรกจำเป็นก่อนเริ่มตรวจ ข้อที่เหลือเพิ่มได้ภายหลัง</p>
+    <ol class="todo">
+      <li>{{ 'เสร็จแล้ว: ' if done.ai }}<a href="/admin/settings">ใส่ API key ของ AI</a> แล้วกดทดสอบด้วยภาพตัวอย่าง{% if not done.ai and s.ai1_type == 'demo' %} <span class="muted">(ตอนนี้เป็นโหมดทดลอง คะแนนไม่ใช่ของจริง)</span>{% endif %}</li>
+      <li>{{ 'เสร็จแล้ว: ' if done.depts }}<a href="/admin/departments">เพิ่มแผนก</a>ที่เข้าร่วม{% if done.depts %} <span class="muted">({{ done.depts }} แผนก)</span>{% endif %}</li>
+      <li>{{ 'เสร็จแล้ว: ' if done.users and done.verifier }}<a href="/admin/users">สร้างบัญชีผู้ใช้</a>ของตัวแทนแผนก และเปิดสิทธิ์ยืนยันผลให้หัวหน้าหรือกรรมการอย่างน้อย 1 คน{% if done.users and not done.verifier %} <span class="muted">(ยังไม่มีบัญชีที่ยืนยันผลได้นอกจากผู้ดูแล)</span>{% endif %}</li>
+      <li>{{ 'เสร็จแล้ว: ' if done.round }}<a href="/admin/rounds">สร้างรอบการตรวจ</a>รอบแรก ใส่วันสิ้นสุดและติ๊กปิดรอบเอง รอบถัดไประบบสร้างให้ทุกเดือน</li>
+      <li>{{ 'เสร็จแล้ว: ' if done.areas }}<a href="/admin/areas">กำหนดจุดตรวจ</a>ของแต่ละแผนก <span class="muted">(ไม่บังคับ ถ้าไม่กำหนด ผู้ส่งภาพพิมพ์ชื่อจุดเอง)</span></li>
+      <li>{{ 'เสร็จแล้ว: ' if done.channel }}<a href="/admin/notifications">ตั้งช่องทางแจ้งเตือน</a>ของผู้ดูแล <span class="muted">(ไม่บังคับ)</span></li>
+      <li>{{ 'เสร็จแล้ว: ' if done.cameras }}<a href="/admin/cameras">ลงทะเบียนกล้อง IP</a> <span class="muted">(ไม่บังคับ ใช้มือถือถ่ายได้ทันที)</span></li>
+    </ol>
+  </section>
+
+  <section class="panel panel-line">
+    <h2>ควรรู้ก่อนเริ่ม</h2>
+    <ul class="tips">
+      <li>ชุดตั้งค่าเป็นจุดเริ่มต้น ไม่ใช่มาตรฐานตายตัว อ่านรายการตรวจเทียบกับใบตรวจ 5ส ของหน่วยงาน แล้วแก้ข้อความ แต้ม หรือปิดข้อที่ไม่ใช้ที่หน้า รายการตรวจ</li>
+      <li>ชุดตั้งค่าเปิด นับคะแนนเฉพาะภาพที่ยืนยันแล้ว คะแนนจึงยังไม่ขึ้นจนกว่าหัวหน้าหรือกรรมการจะยืนยันผลที่เมนู ยืนยันผล ปิดได้ที่หน้า ตั้งค่าและ AI</li>
+      <li>ลองกับรอบทดสอบก่อน: ให้กรรมการตัดสินภาพชุดเดียวกับ AI แล้วดูหน้า ความแม่นของ AI ว่าข้อใดควรเขียนให้ชัดขึ้น</li>
+      <li>การแก้หมวดหรือรายการตรวจมีผลกับรอบที่สร้างใหม่ รอบที่เปิดอยู่ใช้ชุดเดิมจนกว่าจะกด ใช้เกณฑ์ล่าสุดกับรอบนี้</li>
+    </ul>
+  </section>
+</div>
+{% endblock %}

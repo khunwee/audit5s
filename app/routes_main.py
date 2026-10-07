@@ -1,6 +1,7 @@
 """หน้าสำหรับผู้ใช้ทุกคน: เข้าสู่ระบบ ถ่ายและส่งภาพ ดูผล อันดับ รายงาน ส่งออก และจุดรับภาพจากกล้อง"""
 import time
 
+from sqlalchemy import and_, case, or_
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -158,7 +159,7 @@ def home(request: Request, user=Depends(current_user), db=Depends(get_db)):
 
 # --------------------------------------------------------------------------- ถ่ายและส่งภาพ
 @router.get("/capture", response_class=HTMLResponse)
-def capture(request: Request, after: int = 0, user=Depends(current_user), db=Depends(get_db)):
+def capture(request: Request, after: int = 0, area: int = 0, user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
     rounds = db.query(Round).filter(Round.status == "open").order_by(Round.id.desc()).all()
     depts = upload_depts(user, db)
@@ -180,8 +181,15 @@ def capture(request: Request, after: int = 0, user=Depends(current_user), db=Dep
         for a in (db.query(AuditArea).filter(AuditArea.active.is_(True), AuditArea.department_id.in_([d.id for d in depts]))
                   .order_by(AuditArea.sort_order, AuditArea.id).all()):
             defined.setdefault(str(a.department_id), []).append(dict(id=a.id, name=a.name, type=a.area_type, required=a.required))
+    scanned = None
+    if area:                                   # เปิดจากป้าย QR ของจุดตรวจ: เลือกแผนกและจุดตรวจให้เอง
+        target = db.get(AuditArea, area)
+        if target is not None and target.active and target.department_id in [d.id for d in depts]:
+            scanned = dict(id=target.id, name=target.name, dept=target.department_id)
+        else:
+            flash(request, "ป้าย QR นี้เป็นของจุดตรวจที่บัญชีของคุณส่งภาพให้ไม่ได้ หรือจุดตรวจถูกปิดใช้แล้ว", "err")
     return render(request, "capture.html", user, db, rounds=rounds, depts=depts, areas=sorted(areas), before=before,
-                  defined=defined,
+                  defined=defined, scanned=scanned,
                   usage=storage.usage(db, s), ai_ready=ai.is_configured(s), cams=cams,
                   agent_online=cameras.agent_online())
 
@@ -189,7 +197,7 @@ def capture(request: Request, after: int = 0, user=Depends(current_user), db=Dep
 @router.post("/api/photos")
 def upload_photo(file: UploadFile = File(...), round_id: int = Form(...), department_id: int = Form(...),
                  area_name: str = Form(""), area_type: str = Form(""), note: str = Form(""),
-                 source: str = Form("mobile"), after_of: int = Form(0), area_id: int = Form(0),
+                 source: str = Form("mobile"), after_of: int = Form(0), area_id: int = Form(0), shot_at: str = Form(""),
                  user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
     if department_id not in [d.id for d in upload_depts(user, db)]:
@@ -199,8 +207,8 @@ def upload_photo(file: UploadFile = File(...), round_id: int = Form(...), depart
                             area_name=area_name, area_type=area_type, note=note, uploader_id=user.id,
                             uploader_name=user.full_name or user.username,
                             source=source if source in ("mobile", "gallery", "webcam") else "mobile",
-                            after_of=after_of or None, area_id=area_id or None, enforce_area=True)
-    return {"id": p.id, "status": p.status, "ai_ready": ai.is_configured(s)}
+                            after_of=after_of or None, area_id=area_id or None, enforce_area=True, shot_at=shot_at)
+    return {"id": p.id, "status": p.status, "ai_ready": ai.is_configured(s), "stale": bool(p.stale)}
 
 
 @router.get("/api/photos/status")
@@ -341,6 +349,10 @@ def photos(request: Request, round: int = 0, dept: int = 0, status: str = "", pa
             q = q.filter(Photo.overridden.is_(True))
         elif status == "unverified":
             q = q.filter(Photo.status == "done", Photo.verified_at.is_(None))
+        elif status == "appeal":
+            q = q.filter(Photo.appeal_status == "open")
+        elif status == "stale":
+            q = q.filter(Photo.stale.is_(True))
         total = q.count()
         page = max(1, page)
         items = q.order_by(Photo.id.desc()).offset((page - 1) * PAGE).limit(PAGE).all()
@@ -354,7 +366,7 @@ def photo_detail(pid: int, request: Request, user=Depends(current_user), db=Depe
     rnd = db.get(Round, p.round_id)
     before = db.get(Photo, p.after_of) if p.after_of else None
     after = db.query(Photo).filter(Photo.after_of == p.id).order_by(Photo.id.desc()).first()
-    can_fix = rnd.status == "open" and p.department_id in [d.id for d in upload_depts(user, db)]
+    can_fix = rnd.status == "open" and p.department_id in [d.id for d in upload_depts(user, db)]      # ส่งภาพหลังแก้ไขและขอทบทวนได้
     checklist = rules.applicable(rnd.checklist or [], rnd.rubric or [], p) if (rnd.mode or "level") == "checklist" else []
     return render(request, "photo.html", user, db, p=p, rnd=rnd, deletable=can_delete(user, p, rnd),
                   before=before, after=after, can_fix=can_fix, can_verify=may_verify(user, p),
@@ -491,19 +503,49 @@ def verify_queue(request: Request, round: int = 0, dept: int = 0, user=Depends(n
         depts = [d for d in depts if d.id in dept_ids(user)]
     items, total = [], 0
     if rnd:
-        q = db.query(Photo).filter(Photo.round_id == rnd.id, Photo.status == "done", Photo.verified_at.is_(None))
+        q = db.query(Photo).filter(Photo.round_id == rnd.id, Photo.status.in_(["done", "rejected"]),
+                                   or_(and_(Photo.status == "done", Photo.verified_at.is_(None)), Photo.appeal_status == "open"))
         if not can_view_dept(user, -1, s):
             q = q.filter(Photo.department_id.in_(dept_ids(user) or {-1}))
         if dept:
             q = q.filter(Photo.department_id == dept)
         total = q.count()
-        items = q.order_by(Photo.review_flag.desc().nulls_last(), Photo.percent.asc(), Photo.id).limit(12).all()
+        items = q.order_by(case((Photo.appeal_status == "open", 0), else_=1), Photo.review_flag.desc().nulls_last(),
+                           Photo.percent.asc(), Photo.id).limit(12).all()
     return render(request, "verify.html", user, db, rounds=rounds, rnd=rnd, depts=depts, dept=dept, items=items,
                   total=total, mine=[p.id for p in items if not may_verify(user, p)])
 
 
 def _image_response(data: bytes) -> Response:
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.post("/photos/{pid}/appeal")
+def photo_appeal(pid: int, request: Request, note: str = Form(""), user=Depends(current_user), db=Depends(get_db)):
+    """แผนกเจ้าของภาพขอให้กรรมการทบทวนผลของภาพ พร้อมเหตุผล (หนึ่งคำขอต่อผลหนึ่งครั้ง)"""
+    p = get_photo(db, pid, user)
+    rnd = db.get(Round, p.round_id)
+    if p.department_id not in [d.id for d in upload_depts(user, db)]:
+        raise HTTPException(403, "ขอทบทวนได้เฉพาะภาพของแผนกตัวเอง")
+    note = (note or "").strip()[:1000]
+    if p.status not in ("done", "rejected"):
+        flash(request, "ขอทบทวนได้เมื่อภาพมีผลแล้ว", "err")
+    elif rnd.status != "open":
+        flash(request, "รอบนี้ปิดแล้ว จึงขอทบทวนผ่านระบบไม่ได้ ติดต่อกรรมการโดยตรง", "err")
+    elif p.appeal_status == "open":
+        flash(request, "ภาพนี้มีคำขอทบทวนที่รอกรรมการอยู่แล้ว", "err")
+    elif len(note) < 10:
+        flash(request, "อธิบายว่าผลข้อใดไม่ตรงกับสภาพจริง และเพราะอะไร (อย่างน้อย 10 ตัวอักษร)", "err")
+    else:
+        p.appeal_status, p.appeal_note, p.appeal_by, p.appeal_at = "open", note, user.full_name or user.username, now()
+        p.appeal_reply, p.appeal_closed_by, p.appeal_closed_at = "", "", None
+        log(db, user, "appeal_photo", f"ภาพ {p.id} {p.department.name} / {p.area_name}: {note[:300]}")
+        db.commit()
+        link = (settings_store.load().get("public_url") or "").rstrip("/")
+        notify.alert_admin(db, f"appeal_{p.id}", f"แผนก {p.department.name} ขอทบทวนผลของภาพ {p.area_name}: {note[:300]}"
+                           + (f"\n{link}/photos/{p.id}" if link else ""), 1)
+        flash(request, "ส่งคำขอทบทวนแล้ว กรรมการจะดูภาพและตอบกลับในหน้านี้")
+    return RedirectResponse(f"/photos/{pid}", 303)
 
 
 @router.get("/photos/{pid}/image")
@@ -544,7 +586,7 @@ def photo_delete(pid: int, request: Request, user=Depends(current_user), db=Depe
 
 # --------------------------------------------------------------------------- อันดับ รายงาน ส่งออก
 @router.get("/ranking", response_class=HTMLResponse)
-def ranking_page(request: Request, round: int = 0, user=Depends(current_user), db=Depends(get_db)):
+def ranking_page(request: Request, round: int = 0, group: str = "", user=Depends(current_user), db=Depends(get_db)):
     s = settings_store.load()
     rounds = db.query(Round).filter(Round.status != "planned").order_by(Round.id.desc()).all()
     rnd = db.get(Round, round) if round else active_round(db)
@@ -553,7 +595,13 @@ def ranking_page(request: Request, round: int = 0, user=Depends(current_user), d
         allowed = can_rank(user, rnd, s)
         if allowed:
             ranking = scoring.round_ranking(db, rnd)
-    return render(request, "ranking.html", user, db, rounds=rounds, rnd=rnd, ranking=ranking, allowed=allowed)
+    if ranking and group and group in ranking["groups"]:           # แสดงเฉพาะกลุ่มที่เลือก โดยใช้อันดับภายในกลุ่ม
+        ranking = dict(ranking, ranked=[r for r in ranking["ranked"] if r["group"] == group],
+                       unranked=[r for r in ranking["unranked"] if r["group"] == group],
+                       idle=[r for r in ranking["idle"] if r["group"] == group])
+    else:
+        group = ""
+    return render(request, "ranking.html", user, db, rounds=rounds, rnd=rnd, ranking=ranking, allowed=allowed, group=group)
 
 
 @router.get("/rounds/{rid}/dept/{did}", response_class=HTMLResponse)

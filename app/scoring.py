@@ -85,6 +85,17 @@ def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
     for i, r in enumerate(ranked):
         same = i > 0 and ranked[i - 1]["avg"] == r["avg"] and ranked[i - 1]["low"] == r["low"]
         r["rank"] = ranked[i - 1]["rank"] if same else i + 1
+    # อันดับภายในกลุ่มของแผนก (เช่น ผลิต สนับสนุน สำนักงาน) ใช้กติกาเดียวกับอันดับรวม
+    last = {}
+    for r in ranked:
+        g = (r["dept"].group_name or "").strip()
+        n, prev_row = last.get(g, (0, None))
+        same = prev_row is not None and prev_row["avg"] == r["avg"] and prev_row["low"] == r["low"]
+        r["group"], r["group_rank"] = g, (prev_row["group_rank"] if same else n + 1)
+        last[g] = (n + 1, r)
+    for r in rows:
+        r.setdefault("group", (r["dept"].group_name or "").strip())
+        r.setdefault("group_rank", None)
     prev = None
     if with_prev:
         prev = db.query(Round).filter(Round.id < rnd.id, Round.status != "planned").order_by(Round.id.desc()).first()
@@ -96,7 +107,8 @@ def round_ranking(db, rnd: Round, with_prev: bool = True) -> dict:
     unranked = sorted([r for r in rows if not r["qualified"] and r["total"] > 0],
                       key=lambda r: r["dept"].name)
     idle = sorted([r for r in rows if r["total"] == 0], key=lambda r: r["dept"].name)
-    return dict(ranked=ranked, unranked=unranked, idle=idle, rubric=rubric, prev=prev,
+    groups = sorted({r["group"] for r in rows if r["group"]})
+    return dict(ranked=ranked, unranked=unranked, idle=idle, rubric=rubric, prev=prev, groups=groups,
                 verify_required=verified_only, require_coverage=need_cover,
                 has_areas=any(required.values()),
                 photo_count=len(photos),
