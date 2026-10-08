@@ -348,7 +348,7 @@ def test_05_reminders_before_the_round_closes():
 
 def test_06_presets_cover_boards_and_documents():
     a, d = S["admin"], S["d"]
-    for key, n in (("factory", 22), ("office", 17)):
+    for key, n in (("factory", 24), ("office", 19)):
         p = presets.preview(key)
         assert p["n_checks"] == n and p["area_types"][-1] == "บอร์ดและเอกสาร 5ส"
         assert [c[0] for c in presets.PRESETS[key]["checks"]][-3:] == ["D01", "D02", "D03"]

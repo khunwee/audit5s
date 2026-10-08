@@ -62,7 +62,9 @@ def f_short(name):
 
 
 templates.env.filters.update(dt=f_dt, d=f_date, num=f_num, mb=f_mb, short=f_short)
-templates.env.globals.update(AREA_TYPES=config.AREA_TYPES, ROLES=config.ROLES, STATUS=STATUS,
+from . import presets as _presets  # noqa: E402
+
+templates.env.globals.update(preset_rev=_presets.PRESET_REV, AREA_TYPES=config.AREA_TYPES, ROLES=config.ROLES, STATUS=STATUS,
                              APP_NAME=config.APP_NAME, APP_VERSION=config.APP_VERSION, band=band,
                              can=security.can, manages=security.manages, PERMS=security.PERMS,
                              area_label=area_label, SOURCES=SOURCES, CHECK_STATUS=rules.STATUS)

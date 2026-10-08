@@ -327,6 +327,7 @@ def setup_page(request: Request, user=Depends(admin_user), db=Depends(get_db)):
         channel=any("system" in (c.events or []) for c in db.query(Channel).filter(Channel.active.is_(True)).all()),
         cameras=db.query(Camera).filter(Camera.active.is_(True)).count())
     return render(request, "admin/setup.html", user, db, s=s, done=done, labels=presets.SETTING_LABELS,
+                  newer=bool(s.get("preset")) and int(s.get("preset_rev", 1) or 1) < presets.PRESET_REV,
                   previews=[presets.preview(k) for k in presets.PRESETS],
                   n_checks=db.query(Checkpoint).filter(Checkpoint.area_id.is_(None), Checkpoint.active.is_(True)).count(),
                   n_rounds=db.query(Round).count())

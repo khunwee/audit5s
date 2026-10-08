@@ -78,7 +78,7 @@ def test_01_getting_started_page_explains_the_structure():
     assert "ยังไม่ได้เลือกชุดตั้งค่าเริ่มต้น" in a.get("/admin").text and 'href="/admin/setup"' in a.get("/admin").text
     page = a.get("/admin/setup")
     assert page.status_code == 200
-    for text in ("โครงสร้างของการตั้งค่า", "ชุดโรงงาน", "ชุดสำนักงาน", "ดูรายการตรวจทั้ง 22 ข้อ", "ดูรายการตรวจทั้ง 17 ข้อ", "สิ่งที่ต้องทำเอง",
+    for text in ("โครงสร้างของการตั้งค่า", "ชุดโรงงาน", "ชุดสำนักงาน", "ดูรายการตรวจทั้ง 24 ข้อ", "ดูรายการตรวจทั้ง 19 ข้อ", "สิ่งที่ต้องทำเอง",
                  "ทางเดินโล่ง ไม่มีสิ่งของวางอยู่ในทางเดิน", "ห้องประชุมพร้อมใช้", "ไม่วางทับหรือคร่อมเส้นเหลือง", "ระบบคำนวณเอง"):
         assert text in page.text, text
     a.post("/admin/departments/save", data={"code": "P1", "name": "แผนกชุดตั้งค่า"})
@@ -112,7 +112,7 @@ def test_02_factory_preset_sets_everything_at_once():
     s_ = settings_store.load()
     assert s_["preset"] == "factory" and s_["_rule_rev"] == rev + 1
     got = codes()
-    assert len(got) == 22 and got[:3] == ["C01", "C02", "C03"] and {"C14", "C15", "C16", "O01", "O04", "O06"} <= set(got)
+    assert len(got) == 24 and got[:3] == ["C01", "C02", "C03"] and {"C14", "C15", "C16", "C17", "O01", "O02", "O04", "O06"} <= set(got)
     with dbm.SessionLocal() as s:
         crit = {c.code: c for c in s.query(dbm.Criterion).all()}
         assert [crit[c].kind for c in ("S1", "S2", "S3", "S4", "S5")] == ["ai", "ai", "ai", "ai", "sustain"]
@@ -137,13 +137,13 @@ def test_02_factory_preset_sets_everything_at_once():
     a.post("/admin/rounds/save", data={"name": "รอบชุดโรงงาน", "min_photos": 1})
     with dbm.SessionLocal() as s:
         r = s.query(dbm.Round).filter_by(name="รอบชุดโรงงาน").one()
-        assert r.mode == "checklist" and len(r.checklist) == 23 and r.rule_rev == rev + 1
+        assert r.mode == "checklist" and len(r.checklist) == 25 and r.rule_rev == rev + 1
         rid = r.id
     line = {c["code"] for c in shoot(S["mem"], rid, dept, "สายการผลิต").analysis["checks"]}
     office = {c["code"] for c in shoot(S["mem"], rid, dept, "สำนักงานในโรงงาน").analysis["checks"]}
     walk = {c["code"] for c in shoot(S["mem"], rid, dept, "ทางเดินและพื้นที่ส่วนกลาง").analysis["checks"]}
-    assert {"C02", "C05", "C09"} <= line and not (line & {"O01", "O04", "O06"}) and len(line) == 16
-    assert {"O01", "O04", "O06", "C04", "C13"} <= office and not (office & {"C02", "C03", "C05", "C09"})
+    assert {"C02", "C05", "C09"} <= line and not (line & {"O01", "O02", "O04", "O06"}) and len(line) == 17 and "C17" in line
+    assert {"O01", "O02", "O04", "O06", "C04", "C13"} <= office and not (office & {"C02", "C03", "C05", "C09", "C17"})
     assert walk == {"C01", "C04", "C14", "C08", "C10", "C15", "C13", "C16"}
     with dbm.SessionLocal() as s:
         checks = s.get(dbm.Round, rid).checklist[:3]
@@ -155,9 +155,9 @@ def test_02_factory_preset_sets_everything_at_once():
     with dbm.SessionLocal() as s:
         kid = s.query(dbm.Checkpoint).filter_by(code="C14").one().id
     a.post(f"/admin/checkpoints/{kid}/delete")
-    assert len(codes()) == 21
-    assert a.post("/admin/checkpoints/reset").status_code == 303 and len(codes()) == 22
-    assert "ชุดโรงงาน 22 ข้อ" in a.get("/admin/checkpoints").text
+    assert len(codes()) == 23
+    assert a.post("/admin/checkpoints/reset").status_code == 303 and len(codes()) == 24
+    assert "ชุดโรงงาน 24 ข้อ" in a.get("/admin/checkpoints").text
     S["rid"] = rid
 
 
@@ -166,13 +166,13 @@ def test_03_office_preset_and_partial_apply():
     assert a.post("/admin/setup/apply", data={"preset": "office", "rules": "1"}).status_code == 303       # เฉพาะหมวดและรายการตรวจ
     s_ = settings_store.load()
     got = codes()
-    assert s_["preset"] == "office" and len(got) == 17 and got[0] == "O01" and "C02" not in got
+    assert s_["preset"] == "office" and len(got) == 19 and got[0] == "O01" and "C02" not in got
     assert s_["area_types"][0] == "สายการผลิต" and s_["cam_schedule"]["random"] == 2                       # การตั้งค่ายังเป็นของชุดโรงงาน
     assert a.post("/admin/setup/apply", data={"preset": "office", "settings": "1"}).status_code == 303
     s_ = settings_store.load()
     assert s_["area_types"][:5] == ["โต๊ะทำงาน", "ห้องประชุม", "ห้องเก็บเอกสาร", "พื้นที่ส่วนกลาง", "ห้องเตรียมอาหาร"]
     assert "สายการผลิต" in s_["area_types"] and s_["cam_schedule"] == {"times": [], "random": 1, "between": "09:00-16:00", "days": [0, 1, 2, 3, 4]}
-    assert "ของใช้ส่วนตัวจำนวนเล็กน้อย" in s_["ai_extra"] and len(codes()) == 17
+    assert "ให้นับที่ข้อ O02: กระเป๋าเป้" in s_["ai_extra"] and len(codes()) == 19
     with dbm.SessionLocal() as s:
         for r in s.query(dbm.Round).filter(dbm.Round.status == "open"):
             r.status = "closed"
@@ -183,7 +183,7 @@ def test_03_office_preset_and_partial_apply():
     meeting = {c["code"] for c in shoot(S["mem"], rid, S["dept"], "ห้องประชุม").analysis["checks"]}
     desk = {c["code"] for c in shoot(S["mem"], rid, S["dept"], "โต๊ะทำงาน").analysis["checks"]}
     assert "O08" in meeting and "O01" not in meeting and "O11" not in meeting
-    assert {"O01", "O04"} <= desk and "O08" not in desk
+    assert {"O01", "O02", "O04", "O15", "O16"} <= desk and "O08" not in desk
     page = a.get("/admin/setup").text
     assert "ตอนนี้ใช้ชุด <b>สำนักงาน</b>" in page
     for url in ("/", "/admin", "/admin/setup", "/admin/checkpoints", "/admin/criteria", "/admin/settings", "/admin/cameras", "/capture",
@@ -192,7 +192,7 @@ def test_03_office_preset_and_partial_apply():
         assert got.status_code == 200 and "Traceback" not in got.text, url
     # กลับไปใช้ชุดโรงงานได้ทุกเมื่อ
     a.post("/admin/setup/apply", data={"preset": "factory", "rules": "1", "settings": "1"})
-    assert len(codes()) == 22 and settings_store.load()["area_types"][0] == "สายการผลิต"
+    assert len(codes()) == 24 and settings_store.load()["area_types"][0] == "สายการผลิต"
     save(verify_required=False, rounds_repeat="off", preset="")
 
 
@@ -249,3 +249,41 @@ def test_04_phone_camera_files():
     # หน้าถ่ายภาพมีปุ่มกล้องสำหรับมือถือ
     page = S["mem"].get("/capture").text
     assert 'id="cam" accept="image/*" capture="environment"' in page and "ถ่ายภาพ" in page
+
+
+def test_05_preset_revision_two_is_countable_and_explicit():
+    """ฉบับที่ 2 ของชุดตั้งค่า: ทุกข้อบอกเกณฑ์เป็นจำนวนที่นับได้ มีข้อเรื่องของบนพื้นและของใช้ส่วนตัว และมีคู่มือการตัดสินให้ AI"""
+    import re
+    a = S["admin"]
+    for key in ("factory", "office"):
+        for code, crit, text, minor, major, points, types, en in presets.PRESETS[key]["checks"]:
+            assert text and minor and major and en and points in (5, 10), code
+            assert minor != major and len(minor) >= 8 and len(major) >= 8, code
+        guide = presets.PRESETS[key]["settings"]["ai_extra"]
+        assert "ให้นับที่ข้อที่ตรงที่สุดเพียงข้อเดียว" in guide and "ตรวจให้ทั่วทั้งภาพ" in guide and len(guide) < 3000
+        counted = [c for c in presets.PRESETS[key]["checks"] if re.search(r"\d", c[3] + c[4])]
+        assert len(counted) >= len(presets.PRESETS[key]["checks"]) - 6, key          # เกือบทุกข้อมีจำนวนกำกับ
+    office = {c[0]: c for c in presets.OFFICE_CHECKS}
+    assert "กระเป๋า" in office["O02"][2] and "บนพื้น" in office["O02"][2] and "1 ชิ้น" in office["O02"][3] and "ตั้งแต่ 2 ชิ้น" in office["O02"][4]
+    assert "พาดพนักเก้าอี้" in office["O15"][2] and "พื้นที่ว่าง" in office["O16"][2]
+    factory = {c[0]: c for c in presets.FACTORY_CHECKS}
+    assert "ของใช้ส่วนตัว" in factory["C17"][2] and factory["O02"][6] == ["สำนักงานในโรงงาน"] and factory["C17"][6] == presets.PROD
+    assert "แม้เจ้าของจะนั่งอยู่ที่โต๊ะนั้น" in presets.PRESETS["office"]["settings"]["ai_extra"]
+    assert (presets.PRESETS["office"]["settings"]["band_good"], presets.PRESETS["factory"]["settings"]["band_mid"]) == (90, 80)
+    assert "ให้นับที่ข้อ C17" in presets.PRESETS["factory"]["settings"]["ai_extra"]
+    # กติกากลางของ AI: นับก่อนตัดสิน ใช้เกณฑ์ตามตัวอักษร และมองทั้งภาพ
+    for rule in ("นับจำนวนสิ่งของหรือจุด", "ถ้าถึงเกณฑ์ของ major ต้องตอบ major", "ใต้โต๊ะ", "จำนวนที่นับได้", "ข้อที่ตรงที่สุดเพียงข้อเดียว"):
+        assert rule in ai.CHECK_SYSTEM, rule
+    # ระบบที่ใช้ชุดตั้งค่าฉบับเดิมอยู่ได้รับแจ้งว่ามีฉบับใหม่ และหายไปเมื่อกดใช้
+    save(preset="office", preset_rev=1)
+    assert "ชุดตั้งค่าเริ่มต้นมีฉบับปรับปรุง" in a.get("/admin").text and "ชุดตั้งค่ามีฉบับปรับปรุง" in a.get("/admin/setup").text
+    a.post("/admin/setup/apply", data={"preset": "office", "rules": "1", "settings": "1"})
+    assert settings_store.load()["preset_rev"] == presets.PRESET_REV
+    assert "ฉบับปรับปรุง" not in a.get("/admin").text and "ชุดตั้งค่ามีฉบับปรับปรุง" not in a.get("/admin/setup").text
+    with dbm.SessionLocal() as s:
+        k = s.query(dbm.Checkpoint).filter_by(code="O02").one()
+        assert "กระเป๋า" in k.text and k.minor_hint.startswith("มีของวางบนพื้น 1 ชิ้น") and k.text_en.startswith("Nothing is placed on the floor")
+        checks = [dict(code=k.code, text=k.text, minor_hint=k.minor_hint, major_hint=k.major_hint, allow_na=True)]
+    prompt = ai.build_check_prompt(checks, dict(area_type="โต๊ะทำงาน", area_name="โต๊ะ", note=""), settings_store.load()["ai_extra"])
+    assert "minor เมื่อ: มีของวางบนพื้น 1 ชิ้น" in prompt and "major เมื่อ: มีของวางบนพื้นตั้งแต่ 2 ชิ้น" in prompt and "กระเป๋าเป้ กระเป๋าถือ" in prompt
+    save(verify_required=False, rounds_repeat="off", preset="", gallery_max_age_h=0)

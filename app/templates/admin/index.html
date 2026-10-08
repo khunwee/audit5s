@@ -4,6 +4,9 @@
 <div class="page-head"><div><h1>จัดการระบบ</h1></div></div>
 {% include "admin/_nav.html" %}
 <div class="stack">
+  {% if user.role == 'admin' and settings.preset and (settings.preset_rev or 1) < preset_rev %}
+  <p class="note"><b>ชุดตั้งค่าเริ่มต้นมีฉบับปรับปรุง</b> เกณฑ์ละเอียดขึ้นและมีคู่มือการตัดสินให้ AI <a href="/admin/setup">ไปหน้า เริ่มต้นใช้งาน เพื่อรับฉบับใหม่</a></p>
+  {% endif %}
   {% if user.role == 'admin' and not settings.preset %}
   <p class="note blue"><b>ยังไม่ได้เลือกชุดตั้งค่าเริ่มต้น</b> เลือกชุด โรงงาน หรือ สำนักงาน เพื่อให้ระบบตั้งหมวด รายการตรวจ และค่าที่แนะนำให้ครบในครั้งเดียว <a href="/admin/setup">ไปหน้า เริ่มต้นใช้งาน</a></p>
   {% endif %}
