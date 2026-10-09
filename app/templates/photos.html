@@ -19,6 +19,7 @@
           <option value="appeal"{{ ' selected' if status == 'appeal' }}>แผนกขอทบทวน</option>
           <option value="stale"{{ ' selected' if status == 'stale' }}>ภาพจากคลังที่ถ่ายไว้นานแล้ว</option>
     <option value="review"{{ ' selected' if status == 'review' }}>ควรให้กรรมการตรวจ</option>
+    <option value="backup"{{ ' selected' if status == 'backup' }}>ได้คะแนนจาก AI สำรอง</option>
     <option value="override"{{ ' selected' if status == 'override' }}>กรรมการปรับคะแนนแล้ว</option>
   </select></label>
   <noscript><button class="btn">แสดง</button></noscript>
@@ -26,6 +27,7 @@
 {% if not items %}
   <div class="empty"><h2>ไม่มีภาพตามเงื่อนไขนี้</h2><p>ลองเปลี่ยนแผนกหรือสถานะ หรือส่งภาพใหม่</p>{% if rnd.status == 'open' %}<a class="btn primary" href="/capture">ถ่ายภาพส่งตรวจ</a>{% endif %}</div>
 {% else %}
+{% if queue_note %}<p class="note blue" style="margin-bottom:12px" data-list-poll="{{ open_ids|join(',') }}">{{ queue_note }}{% if queue_secs is not none %} <b data-countdown="{{ queue_secs }}">{{ dur(queue_secs) }}</b>{% endif %}{% if queue_tail %} <span data-list-tail>{{ queue_tail }}</span>{% endif %}{% if can(user, 'rounds') or user.role == 'admin' %} <a href="/admin/queue">ดูคิววิเคราะห์</a>{% endif %}</p>{% endif %}
 <div class="photo-grid">
   {% for p in items %}
   <a class="photo-card" href="/photos/{{ p.id }}">

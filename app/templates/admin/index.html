@@ -44,7 +44,8 @@
         <div><dt>ภาพใช้ไม่ได้</dt><dd>{{ counts.get('rejected', 0) }}</dd></div>
         <div><dt>ผิดพลาด</dt><dd>{{ counts.get('error', 0) }}</dd></div>
       </dl>
-      <p style="margin-top:10px">เรียก AI วันนี้ {{ used_today }} จากเพดาน {{ settings.ai_daily }} ครั้ง</p>
+      {% if queue.pending or queue.processing %}<p style="margin-top:10px">{% if queue.paused %}<b>คิวหยุดรอ</b>{% elif queue.eta_s is not none %}คาดว่าคิวหมดในอีก{{ eta_text(queue.eta_s) }}{% endif %}{% if queue.waited_min >= 5 %} ภาพที่รอนานสุดรอมาแล้ว {{ queue.waited_min }} นาที{% endif %}</p>{% endif %}
+      <p style="margin-top:10px">AI หลักรับงานวันนี้ {{ used_today }} ครั้ง{% if settings.ai_daily %} จากเพดาน {{ settings.ai_daily }} ครั้ง{% endif %} <a href="/admin/queue">ดูรายละเอียดคิว</a></p>
       {% if n_unverified and can(user, 'score') %}<p><a href="/verify">{{ n_unverified }} ภาพรอหัวหน้าหรือกรรมการยืนยันผล</a></p>{% endif %}
       {% if n_review %}<p class="note"><a href="/photos?status=review">มี {{ n_review }} ภาพที่ AI ประเมินสองรอบได้ผลต่างกันมาก</a> ควรให้กรรมการดู</p>{% endif %}
       {% if not ai_ready %}<p class="note">ยังไม่ได้ตั้งค่า AI ภาพที่ส่งเข้ามาจะรอในคิว{% if user.role == 'admin' %} <a href="/admin/settings">ตั้งค่า AI</a>{% endif %}</p>

@@ -217,10 +217,15 @@ def photo_status(ids: str = "", user=Depends(current_user), db=Depends(get_db)):
     want = [int(x) for x in ids.split(",") if x.strip().isdigit()][:60]
     out = []
     if want:
-        for p in db.query(Photo).filter(Photo.id.in_(want)).all():
-            if can_view_dept(user, p.department_id, s):
-                out.append(dict(id=p.id, status=p.status, percent=p.percent, score=p.score, max=p.max_score,
-                                error=p.error, issue=(p.analysis or {}).get("image_issue", "")))
+        rows = [p for p in db.query(Photo).filter(Photo.id.in_(want)).all() if can_view_dept(user, p.department_id, s)]
+        open_ids = [p.id for p in rows if p.status in ("pending", "processing")]
+        wait = worker.waits(db, open_ids) if open_ids else {}
+        for p in rows:
+            w = worker.wait_parts(wait.get(p.id))
+            out.append(dict(id=p.id, status=p.status, percent=p.percent, score=p.score, max=p.max_score,
+                            error=p.error, issue=(p.analysis or {}).get("image_issue", ""),
+                            wait=w.get("text", ""), wait_head=w.get("head", ""), wait_lead=w.get("lead", ""),
+                            wait_secs=w.get("secs"), wait_tail=w.get("tail", "")))
     return {"photos": out, "paused": worker.state["paused_reason"]}
 
 
@@ -345,6 +350,8 @@ def photos(request: Request, round: int = 0, dept: int = 0, status: str = "", pa
             q = q.filter(Photo.status == status)
         elif status == "review":
             q = q.filter(Photo.review_flag.is_(True))
+        elif status == "backup":
+            q = q.filter(Photo.status == "done", Photo.ai_slot.in_(worker.BACKUP_SLOTS))
         elif status == "override":
             q = q.filter(Photo.overridden.is_(True))
         elif status == "unverified":
@@ -356,8 +363,28 @@ def photos(request: Request, round: int = 0, dept: int = 0, status: str = "", pa
         total = q.count()
         page = max(1, page)
         items = q.order_by(Photo.id.desc()).offset((page - 1) * PAGE).limit(PAGE).all()
+    open_ids = [p.id for p in items if p.status in ("pending", "processing")]
+    wait = worker.waits(db, open_ids) if open_ids else {}
+    last = max(wait.values(), key=lambda w: w["position"]) if wait else None
+    queue_note, queue_secs, queue_tail = "", None, ""
+    if last:
+        queue_note = f"มี {len(open_ids)} ภาพในหน้านี้ที่ยังรอ AI วิเคราะห์"
+        if not ai.is_configured(s):
+            queue_tail = "ยังไม่ได้ตั้งค่า AI ภาพจะได้คะแนนเมื่อผู้ดูแลตั้งค่า"
+        elif last["eta_s"] is not None:
+            queue_note += " คาดว่าได้ผลครบในอีกประมาณ"
+            queue_secs = last["eta_s"]
+            queue_tail = "หน้านี้จะแสดงผลเองเมื่อเสร็จ"
+        elif last["retry_s"] is not None:
+            queue_note += " คิวหยุดรอ ระบบจะลองเรียก AI อีกครั้งในอีก"
+            queue_secs = last["retry_s"]
+            queue_tail = worker.state["paused_reason"]
+        else:
+            queue_tail = "คิวหยุดรอ: " + (worker.state["paused_reason"] or "รอผู้ให้บริการ AI")
     return render(request, "photos.html", user, db, rounds=rounds, rnd=rnd, depts=depts, dept=dept,
-                  status=status, items=items, total=total, page=page, pages=max(1, -(-total // PAGE)))
+                  status=status, items=items, total=total, page=page, pages=max(1, -(-total // PAGE)),
+                  queue_note=queue_note, queue_secs=queue_secs, queue_tail=queue_tail, open_ids=open_ids,
+                  dur=worker.duration_text)
 
 
 @router.get("/photos/{pid}", response_class=HTMLResponse)
@@ -368,7 +395,8 @@ def photo_detail(pid: int, request: Request, user=Depends(current_user), db=Depe
     after = db.query(Photo).filter(Photo.after_of == p.id).order_by(Photo.id.desc()).first()
     can_fix = rnd.status == "open" and p.department_id in [d.id for d in upload_depts(user, db)]      # ส่งภาพหลังแก้ไขและขอทบทวนได้
     checklist = rules.applicable(rnd.checklist or [], rnd.rubric or [], p) if (rnd.mode or "level") == "checklist" else []
-    return render(request, "photo.html", user, db, p=p, rnd=rnd, deletable=can_delete(user, p, rnd),
+    wait = worker.wait_parts(worker.waits(db, [p.id]).get(p.id)) if p.status in ("pending", "processing") else {}
+    return render(request, "photo.html", user, db, p=p, rnd=rnd, deletable=can_delete(user, p, rnd), wait=wait,
                   before=before, after=after, can_fix=can_fix, can_verify=may_verify(user, p),
                   checklist=checklist, zones=rules.zones_of(checklist),
                   actions=db.query(Action).filter(Action.photo_id == p.id).order_by(Action.id).all(),
@@ -726,6 +754,12 @@ def trend_csv(user=Depends(need("export")), db=Depends(get_db)):
         rows.append([d.name] + [(data["table"].get(d.id, {}).get(r.id) or {}).get("avg", "") or "" for r in data["rounds"]])
     return Response(backup._csv(rows), media_type="text/csv; charset=utf-8",
                     headers=download("5S_แนวโน้มคะแนน.csv", "5S_trend.csv"))
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """หน้าที่ไม่ได้ใช้แม่แบบหลัก (รายงานสำหรับพิมพ์) ไม่มีลิงก์ไอคอน เบราว์เซอร์จึงขอที่อยู่นี้เอง"""
+    return RedirectResponse("/static/icon-192.png", 308)
 
 
 @router.get("/healthz")

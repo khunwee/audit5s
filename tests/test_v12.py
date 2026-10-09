@@ -414,9 +414,9 @@ def test_07_housekeeping_reminders():
     save(retention_days=0, ai_daily=1)
     upload(S["w_m2"], d["W2"], 70, area_name="ค้างคิวเพราะครบเพดาน")
     assert worker.process_one() is False
-    assert "AI ใช้ครบเพดาน 1 ครั้งของวันนี้แล้ว มี 1 ภาพรอในคิว" in alerts()[-1]
+    assert "คิววิเคราะห์ภาพหยุดรอ มี 1 ภาพในคิว" in alerts()[-1] and "ใช้ครบเพดานต่อวันที่ตั้งไว้แล้ว (1 ครั้ง)" in alerts()[-1]
     worker.process_one()
-    assert sum("AI ใช้ครบเพดาน" in x for x in alerts()[before:]) == 1
+    assert sum("ใช้ครบเพดานต่อวัน" in x for x in alerts()[before:]) == 1
     save(ai_daily=100000)
     drain()
     notify.flush(force=True)

@@ -2,6 +2,41 @@
 (function () {
   'use strict';
   var $ = function (s, el) { return (el || document).querySelector(s); };
+
+  // ------------------------------------------------------------ เวลารอคิว: แสดงเป็นนาทีและวินาที แล้วนับถอยหลังเอง
+  var dur = function (n) {
+    n = Math.max(0, Math.round(n));
+    if (n < 60) return n + ' วินาที';
+    if (n < 3600) { var s = n % 60; return Math.floor(n / 60) + ' นาที' + (s ? ' ' + s + ' วินาที' : ''); }
+    var m = Math.floor(n / 60) % 60;
+    return Math.floor(n / 3600) + ' ชั่วโมง' + (m ? ' ' + m + ' นาที' : '');
+  };
+  // ข้อความรอคิวของภาพหนึ่งใบ: ลำดับ + เวลาที่นับถอยหลัง + เหตุผล (ข้อมูลจาก /api/photos/status)
+  var showWait = function (el, prefix, p) {
+    if (!el) return;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(document.createTextNode(prefix + (p.wait_head || '') + (p.wait_lead ? ' ' + p.wait_lead + ' ' : '')));
+    if (p.wait_lead && p.wait_secs !== null && p.wait_secs !== undefined) {
+      var b = document.createElement('b');
+      b.setAttribute('data-countdown', p.wait_secs);
+      b.textContent = dur(p.wait_secs);
+      el.appendChild(b);
+    }
+    if (p.wait_tail) el.appendChild(document.createTextNode(' (' + p.wait_tail + ')'));
+  };
+  setInterval(function () {
+    var list = document.querySelectorAll('[data-countdown]');
+    for (var i = 0; i < list.length; i++) {
+      var raw = list[i].getAttribute('data-countdown');
+      if (raw === '' || raw === null) continue;
+      var left = parseInt(raw, 10);
+      if (isNaN(left)) continue;
+      if (left <= 0) { list[i].textContent = 'อีกสักครู่'; continue; }      // ถึงเวลาที่คาดแล้ว รอข้อมูลรอบถัดไปจากเซิร์ฟเวอร์
+      left -= 1;
+      list[i].setAttribute('data-countdown', left);
+      list[i].textContent = left > 0 ? dur(left) : 'อีกสักครู่';
+    }
+  }, 1000);
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
 
   // ยืนยันก่อนทำคำสั่งที่ย้อนกลับไม่ได้ และกันกดส่งฟอร์มซ้ำ
@@ -210,11 +245,16 @@
       setState(it, 'new', 'กำลังเตรียมภาพ');
       it.shot = it.source === 'gallery' ? '' : isoLocal(new Date());
       if (it.source === 'gallery') shotAt(file).then(function (v) { it.shot = v; });
-      compress(file).then(function (blob) {
+      it.ready = compress(file).then(function (blob) {
         it.blob = blob;
         $('img', node).src = URL.createObjectURL(blob);
         setState(it, 'new', 'ยังไม่ได้ส่ง');
-        if (!nameOf(it)) ($('[data-area-pick]', node).hidden ? $('[data-k=area_name]', node) : $('[data-k=area_id]', node)).focus();
+        // พาไปช่องชื่อจุดตรวจของภาพแรกที่ยังไม่มีชื่อ แต่ไม่แย่งเคอร์เซอร์ถ้าผู้ใช้กำลังพิมพ์หรือเลือกอยู่ที่ช่องอื่น
+        // (รุ่นก่อนหน้านี้ย้ายเคอร์เซอร์ทุกครั้งที่ภาพใบถัดไปเตรียมเสร็จ ตัวอักษรที่กำลังพิมพ์จึงไปลงผิดช่องได้)
+        var act = document.activeElement;
+        var typing = act && /^(INPUT|SELECT|TEXTAREA)$/.test(act.tagName) && act.type !== 'file';
+        var firstBlank = items.filter(function (i) { return i.state === 'new' && !nameOf(i); })[0];
+        if (!typing && firstBlank === it) ($('[data-area-pick]', node).hidden ? $('[data-k=area_name]', node) : $('[data-k=area_id]', node)).focus();
       });
     };
 
@@ -259,7 +299,7 @@
     sendBtn.addEventListener('click', function () {
       if (sending) return;
       if (!$('#dept').value) { window.alert('เลือกแผนกเจ้าของพื้นที่ก่อนส่งภาพ'); $('#dept').focus(); return; }
-      var todo = items.filter(function (i) { return (i.state === 'new' || i.state === 'fail') && i.blob; });
+      var todo = items.filter(function (i) { return i.state === 'new' || i.state === 'fail'; });
       var missing = todo.filter(function (i) { return !nameOf(i); })[0];
       if (missing) {
         window.alert('เลือกหรือใส่ชื่อจุดตรวจให้ครบทุกภาพก่อนส่ง');
@@ -267,9 +307,16 @@
         return;
       }
       sending = true; refresh();
-      var chain = Promise.resolve();
-      todo.forEach(function (it) { chain = chain.then(function () { return sendOne(it); }); });
-      chain.then(function () { sending = false; refresh(); startPoll(); });
+      // ภาพที่เพิ่งเลือกอาจยังย่อไม่เสร็จ: รอให้เตรียมครบก่อนแล้วจึงส่งตามลำดับ
+      // (รุ่นก่อนหน้านี้ข้ามภาพที่ยังเตรียมไม่เสร็จไปเงียบ ๆ ผู้ใช้กดส่งแล้วเหมือนไม่มีอะไรเกิดขึ้น)
+      Promise.all(todo.map(function (i) { return i.ready || Promise.resolve(); })).then(function () {
+        var chain = Promise.resolve();
+        todo.forEach(function (it) {
+          chain = chain.then(function () { return it.blob && items.indexOf(it) >= 0 ? sendOne(it) : null; });
+        });
+        return chain;
+      }).then(function () { sending = false; refresh(); startPoll(); },
+              function () { sending = false; refresh(); });
     });
 
     var poll = function () {
@@ -284,6 +331,7 @@
             if (p.status === 'done') setState(it, 'done', 'ได้ ' + fmt(p.percent) + '% (' + fmt(p.score) + ' จาก ' + fmt(p.max) + ')', p.id);
             else if (p.status === 'rejected') setState(it, 'done', 'ภาพใช้ประเมินไม่ได้ ถ่ายใหม่', p.id);
             else if (p.status === 'error') setState(it, 'done', 'วิเคราะห์ไม่สำเร็จ ผู้ดูแลจะสั่งวิเคราะห์ใหม่', p.id);
+            else if (p.wait) showWait($('[data-state]', it.el), 'ส่งแล้ว ', p);
             else if (data.paused) $('[data-state]', it.el).textContent = 'ส่งแล้ว อยู่ในคิว (' + data.paused + ')';
           });
         }).catch(function () {});
@@ -373,9 +421,43 @@
     var t = setInterval(function () {
       fetch('/api/photos/status?ids=' + pv.getAttribute('data-poll'), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
-          if (d && d.photos[0] && ['pending', 'processing'].indexOf(d.photos[0].status) < 0) { clearInterval(t); window.location.reload(); }
+          if (!d || !d.photos[0]) return;
+          if (['pending', 'processing'].indexOf(d.photos[0].status) < 0) { clearInterval(t); window.location.reload(); return; }
+          var w = $('[data-wait]');
+          if (w && d.photos[0].wait) showWait(w, '', d.photos[0]);          // ลำดับในคิวและเวลาที่คาดว่าจะรอ เปลี่ยนตามคิวจริง
         }).catch(function () {});
     }, 5000);
+  }
+
+  // ------------------------------------------------------------ หน้ารายการภาพ: มีภาพรอผลอยู่ ได้ผลเมื่อไรโหลดใหม่เอง
+  var lp = $('[data-list-poll]');
+  if (lp && lp.getAttribute('data-list-poll')) {
+    var lt = setInterval(function () {
+      if (document.hidden) return;
+      fetch('/api/photos/status?ids=' + lp.getAttribute('data-list-poll'), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          if (!d) return;
+          var done = d.photos.filter(function (p) { return ['pending', 'processing'].indexOf(p.status) < 0; });
+          if (done.length) { clearInterval(lt); window.location.reload(); return; }
+          var cd = $('[data-countdown]', lp), far = null;                  // ปรับเวลาตามภาพที่อยู่ท้ายคิวที่สุด
+          d.photos.forEach(function (p) { if (p.wait_secs !== null && (far === null || p.wait_secs > far)) far = p.wait_secs; });
+          if (cd && far !== null) { cd.setAttribute('data-countdown', far); cd.textContent = dur(far); }
+        }).catch(function () {});
+    }, 8000);
+  }
+
+  // ------------------------------------------------------------ หน้าคิววิเคราะห์: โหลดใหม่เมื่อคิวเปลี่ยน
+  var ql = $('[data-queue-live]');
+  if (ql) {
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch('/admin/queue.json', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+          if (!d) return;
+          var sig = d.pending + ':' + d.processing + ':' + d.errors + ':' + (d.paused ? '1' : '0');
+          if (sig !== ql.getAttribute('data-queue-live')) window.location.reload();
+        }).catch(function () {});
+    }, 8000);
   }
 
   // ------------------------------------------------------------ วาดกรอบโซนบนภาพอ้างอิง (เมาส์และนิ้ว)

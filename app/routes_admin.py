@@ -12,10 +12,8 @@ from PIL import Image, ImageDraw
 from sqlalchemy import case, func
 from starlette.background import BackgroundTask
 
-from . import (actions as act_mod, ai, backup, cameras, config, notify, presets, rounds_auto, rules, schedule, scheduler,
-               scoring,
-               security, settings_store,
-               storage, worker)
+from . import (actions as act_mod, ai, backup, cameras, config, keepalive, notify, presets, providers, rounds_auto, rules,
+               schedule, scheduler, scoring, security, settings_store, storage, worker)
 from .db import (DEFAULT_CRITERIA, Action, AuditArea, AuditLog, Camera, Checkpoint, checklist_snapshot, seed_checkpoints, Channel, Criterion, Department, DeptSummary, NotifyEvent,
                  NotifyLog, Photo, PhotoImage, PhotoThumb, Round, User, get_db, log, now, rubric_snapshot)
 from .photos import area_types
@@ -67,7 +65,7 @@ def overview(request: Request, user=Depends(manager_user), db=Depends(get_db)):
     counts = dict(db.query(Photo.status, func.count(Photo.id)).group_by(Photo.status).all())
     return render(request, "admin/index.html", user, db, usage=storage.usage(db, s), counts=counts,
                   ai_ready=ai.is_configured(s), profiles=ai.profiles(s), used_today=worker.usage_today(db),
-                  wstate=worker.state, n_depts=db.query(Department).filter(Department.active.is_(True)).count(),
+                  wstate=worker.state, queue=worker.queue_info(db), eta_text=worker.eta_text, n_depts=db.query(Department).filter(Department.active.is_(True)).count(),
                   n_users=db.query(User).filter(User.active.is_(True)).count(),
                   open_rounds=db.query(Round).filter(Round.status == "open").count(),
                   n_channels=db.query(Channel).filter(Channel.active.is_(True)).count(),
@@ -188,8 +186,7 @@ def round_action(rid: int, action: str, request: Request, user=Depends(current_u
         target = q.filter(Photo.has_image.is_(True))
         if action == "retry-errors":
             target = target.filter(Photo.status == "error")
-        n = target.update({"status": "pending", "attempts": 0, "next_try_at": None, "error": ""},
-                          synchronize_session=False)
+        n = worker.requeue(db, target)
         kept = q.filter(Photo.has_image.is_(False)).count() if action != "retry-errors" else 0
         msg = f"ส่ง {n} ภาพเข้าคิววิเคราะห์ใหม่"
         if action == "sync-rubric":
@@ -754,11 +751,77 @@ def user_save(request: Request, form=Depends(form_data), user=Depends(admin_user
     return back("/admin/users")
 
 
+# --------------------------------------------------------------------------- คิววิเคราะห์
+QUEUE_LIST = 60
+
+
+@router.get("/queue", response_class=HTMLResponse)
+def queue_page(request: Request, user=Depends(manager_user), db=Depends(get_db)):
+    info = worker.queue_info(db)
+    wait = worker.waits(db)
+    ids = sorted(wait, key=lambda i: wait[i]["position"])[:QUEUE_LIST]
+    rows = {p.id: p for p in db.query(Photo).filter(Photo.id.in_(ids)).all()} if ids else {}
+    waiting = [dict(p=rows[i], w=wait[i], text=worker.eta_text(wait[i]["eta_s"])) for i in ids if i in rows]
+    errors = db.query(Photo).filter(Photo.status == "error").order_by(Photo.id.desc()).limit(30).all()
+    return render(request, "admin/queue.html", user, db, q=info, waiting=waiting, more=max(0, len(wait) - len(waiting)),
+                  errors=errors, eta_text=worker.eta_text, dur=worker.duration_text, s=settings_store.load(), now_utc=now())
+
+
+@router.get("/queue.json")
+def queue_json(user=Depends(manager_user), db=Depends(get_db)):
+    """สรุปสั้นของคิว ใช้ให้หน้า คิววิเคราะห์ รู้ว่าควรโหลดใหม่เมื่อไร"""
+    info = worker.queue_info(db)
+    return {"pending": info["pending"], "processing": info["processing"], "errors": info["errors"],
+            "paused": info["paused"], "eta": worker.eta_text(info["eta_s"]), "eta_s": info["eta_s"],
+            "retry_s": info["retry_s"], "workers": info["workers"]}
+
+
+@router.post("/queue/{action}")
+def queue_action(action: str, request: Request, user=Depends(need("rounds")), db=Depends(get_db)):
+    if action == "kick":
+        out = worker.kick(db)
+        log(db, user, "queue_kick", f"ยกเลิกเวลารอ {out['released']} ภาพ คืนภาพที่ค้าง {out['stuck']} ภาพ")
+        db.commit()
+        flash(request, "สั่งให้คิวเดินทันทีแล้ว"
+              + (f" ยกเลิกเวลารอของ {out['released']} ภาพ" if out["released"] else "")
+              + (f" คืนภาพที่ค้างกลางทาง {out['stuck']} ภาพ" if out["stuck"] else ""))
+    elif action == "retry-errors":
+        n = worker.requeue(db, db.query(Photo).filter(Photo.status == "error", Photo.has_image.is_(True)))
+        log(db, user, "queue_retry_errors", f"{n} ภาพ")
+        db.commit()
+        worker.wake()
+        flash(request, f"ส่ง {n} ภาพที่วิเคราะห์ไม่สำเร็จเข้าคิวใหม่แล้ว" if n else "ไม่มีภาพที่วิเคราะห์ไม่สำเร็จ")
+    elif action == "rescore-backup":
+        out = worker.rescore_with_main(db)
+        log(db, user, "queue_rescore_backup", f"{out['sent']} จาก {out['total']} ภาพ")
+        db.commit()
+        if out["sent"]:
+            flash(request, f"ส่ง {out['sent']} จาก {out['total']} ภาพที่ได้คะแนนจาก AI สำรอง ให้ AI หลักวิเคราะห์ใหม่แล้ว"
+                  + (f" ({out['why']})" if out["why"] else ""))
+        elif not out["total"]:
+            flash(request, "ไม่มีภาพที่ได้คะแนนจาก AI สำรองในรอบที่เปิดอยู่")
+        else:
+            flash(request, f"ยังส่งไม่ได้: {out['why']}", "err")
+    elif action == "wake-host":
+        s = settings_store.load()
+        url = keepalive.target(s)
+        if not url:
+            flash(request, "ยังไม่รู้ที่อยู่เว็บของระบบ ใส่ ที่อยู่เว็บของระบบ ในหน้าตั้งค่าก่อน", "err")
+        elif keepalive.ping(url):
+            flash(request, f"เรียก {url}/healthz สำเร็จ การกัน host หลับใช้ได้กับที่อยู่นี้")
+        else:
+            flash(request, f"เรียก {url}/healthz ไม่สำเร็จ ({keepalive.status(s)['detail']}) ตรวจ ที่อยู่เว็บของระบบ ในหน้าตั้งค่า", "err")
+    else:
+        raise HTTPException(404, "ไม่รู้จักคำสั่งนี้")
+    return back("/admin/queue")
+
+
 # --------------------------------------------------------------------------- ตั้งค่า
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, user=Depends(admin_user), db=Depends(get_db)):
-    return render(request, "admin/settings.html", user, db, s=settings_store.load(),
-                  used_today=worker.usage_today(db))
+    s = settings_store.load()
+    return render(request, "admin/settings.html", user, db, s=s, used_today=worker.usage_today(db),
+                  used=worker.usage_all(db), awake=keepalive.status(s))
 
 
 @router.post("/settings")
@@ -787,8 +850,17 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
            "action_due_days": _int(form.get("action_due_days"), 7, 0, 365),
            "action_due_days_major": _int(form.get("action_due_days_major"), 3, 0, 365),
            "ai_rpm": _int(form.get("ai_rpm"), 6, 1, 60),
-           "ai_daily": _int(form.get("ai_daily"), 200, 1, 100000),
+           "ai_daily": _int(form.get("ai_daily"), 200, 0, 100000),
            "ai_max_attempts": _int(form.get("ai_max_attempts"), 4, 1, 10),
+           "ai_workers": _int(form.get("ai_workers"), old.get("ai_workers", 2), 1, worker.MAX_WORKERS),
+           "ai_timeout": _int(form.get("ai_timeout"), old.get("ai_timeout", 90), 20, 300),
+           "ai2_rpm": _int(form.get("ai2_rpm"), old.get("ai2_rpm", 6), 1, 60),
+           "ai2_daily": _int(form.get("ai2_daily"), old.get("ai2_daily", 0), 0, 100000),
+           "ai3_rpm": _int(form.get("ai3_rpm"), old.get("ai3_rpm", 6), 1, 60),
+           "ai3_daily": _int(form.get("ai3_daily"), old.get("ai3_daily", 0), 0, 100000),
+           "keep_awake": form.get("keep_awake") if form.get("keep_awake") in ("queue", "hours", "off") else old.get("keep_awake", "queue"),
+           "keep_awake_hours": keepalive.clean_hours(form.get("keep_awake_hours") or ""),
+           "queue_alert_min": _int(form.get("queue_alert_min"), old.get("queue_alert_min", 30), 0, 1440),
            "img_max_side": _int(form.get("img_max_side"), 1280, 640, 2400),
            "img_quality": _int(form.get("img_quality"), 78, 50, 92),
            "allow_gallery": form.get("allow_gallery") == "1",
@@ -800,7 +872,7 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
            "purge_requires_backup": form.get("purge_requires_backup") == "1",
            "ranking_visibility": "closed" if form.get("ranking_visibility") == "closed" else "always",
            "member_see_all": form.get("member_see_all") == "1"}
-    for slot in ("ai1", "ai2"):
+    for slot in ai.SLOTS:
         kind = form.get(f"{slot}_type")
         new[f"{slot}_type"] = kind if kind in ("none", "gemini", "openai", "demo") else "none"
         new[f"{slot}_base"] = (form.get(f"{slot}_base") or "").strip()[:300]
@@ -811,16 +883,18 @@ def settings_save(request: Request, form=Depends(form_data), user=Depends(admin_
         elif key:
             new[f"{slot}_key"] = key[:400]
     settings_store.save(db, new)
-    log(db, user, "save_settings", f"AI หลัก {new['ai1_type']} {new['ai1_model']}, สำรอง {new['ai2_type']} {new['ai2_model']}, "
+    log(db, user, "save_settings", f"AI หลัก {new['ai1_type']} {new['ai1_model']}, สำรอง 1 {new['ai2_type']} {new['ai2_model']}, "
+                                   f"สำรอง 2 {new['ai3_type']} {new['ai3_model']}, "
                                    f"ประเมิน {new['ai_passes']} รอบ")
     db.commit()
+    providers.reset()            # ผู้ดูแลเพิ่งแก้การตั้งค่า: ให้คิวลองเรียก AI ใหม่ทันที ไม่ต้องรอให้ครบเวลาพัก
     worker.wake()
     flash(request, "บันทึกการตั้งค่าแล้ว")
     return back("/admin/settings")
 
 
 def _cfg_from(body: dict, s: dict) -> dict:
-    slot = "ai2" if body.get("slot") == "ai2" else "ai1"
+    slot = body.get("slot") if body.get("slot") in ai.SLOTS else "ai1"
     return dict(slot=slot, type=body.get("type") or s[f"{slot}_type"],
                 base=(body.get("base") or "").strip(), model=(body.get("model") or "").strip(),
                 key=(body.get("key") or "").strip() or s.get(f"{slot}_key", ""))
@@ -887,7 +961,7 @@ async def ai_test(request: Request, user=Depends(admin_user), db=Depends(get_db)
 
     def run():
         return ai.analyze(_test_image(), rubric, dict(area_type="คลังสินค้า", area_name="ภาพทดสอบระบบ", note=""),
-                          test, on_call=worker.count_call)
+                          test, on_call=lambda c, e: providers.record(dict(c, slot=cfg["slot"]), e))
     try:
         result, _, model = await anyio.to_thread.run_sync(run)
     except ai.AIError as e:
@@ -1280,7 +1354,7 @@ def photo_action(pid: int, action: str, request: Request, user=Depends(need("sco
         if not p.has_image:
             flash(request, "ภาพเต็มถูกลบไปแล้ว จึงวิเคราะห์ใหม่ไม่ได้", "err")
         else:
-            p.status, p.attempts, p.next_try_at, p.error = "pending", 0, None, ""
+            worker.requeue(db, db.query(Photo).filter(Photo.id == p.id))
             log(db, user, "reanalyze_photo", f"ภาพ {p.id}")
             db.commit()
             worker.wake()
@@ -1327,7 +1401,7 @@ def dept_summarize(rid: int, did: int, request: Request, user=Depends(need("scor
                      actions=(p.analysis or {}).get("top_actions", []))
                 for p in sorted(photos, key=lambda x: x.percent or 0)[:40]])
     try:
-        content, model = ai.summarize(payload, s, on_call=worker.count_call)
+        content, model = ai.summarize(payload, s, on_call=providers.record)
     except ai.AIError as e:
         flash(request, f"สรุปไม่สำเร็จ: {e}", "err")
         return back(f"/rounds/{rid}/dept/{did}")

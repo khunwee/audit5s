@@ -645,7 +645,7 @@ def test_09_round_events_backup_and_cleanup():
     assert "เปิดรอบการตรวจ: รอบทดสอบ 1.1" in sent_to("discord.com")[0]["body"]["content"]
     # แจ้งผู้ดูแลเมื่อ AI ใช้ไม่ได้ (จำกัดไม่ให้แจ้งซ้ำถี่)
     OUT["calls"].clear()
-    save_settings(ai1_key="", _alert_ai_error="")
+    save_settings(ai1_key="", _alert_ai_config="")       # ตั้งค่าผิด: ภาพรอในคิว และแจ้งผู้ดูแลครั้งเดียว
     for seed in (991, 992):
         upload(S["mem"], d["V1"], seed, area=f"ไม่มี key {seed}")
     drain()

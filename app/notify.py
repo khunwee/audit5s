@@ -273,26 +273,39 @@ def emit(db, kind: str, round_id=None, department_id=None, photo_id=None, payloa
     _wake.set()
 
 
+_alert_lock = threading.Lock()
+_alert_busy: set = set()            # เรื่องที่มีเธรดกำลังแจ้งอยู่ในขณะนี้
+
+
 def alert_admin(db, key: str, text: str, hours: float = 20) -> bool:
     """แจ้งผู้ดูแลระบบ: บันทึกไว้ให้เห็นในหน้าจัดการระบบเสมอ และส่งไปยังช่องทางที่รับเรื่องของระบบ
 
     เวลาที่แจ้งครั้งล่าสุดเก็บในฐานข้อมูล host ฟรีที่หลับและตื่นวันละหลายรอบจึงไม่แจ้งเรื่องเดิมซ้ำ
+    หลายเธรดพบเรื่องเดียวกันพร้อมกันได้ (เธรดคิววิเคราะห์มีหลายเธรด): เธรดแรกเป็นผู้แจ้ง เธรดที่เหลือข้าม
     """
     from datetime import datetime
     from .db import AuditLog
     stamp = f"_alert_{key}"
-    last = settings_store.load().get(stamp)
-    t = now()
-    if hours > 0 and last:
-        try:
-            if (t - datetime.fromisoformat(last)).total_seconds() < hours * 3600:
-                return False
-        except ValueError:
-            pass
-    db.add(AuditLog(username="system", action="alert", detail=text[:2000]))
-    emit(db, "system", payload={"text": text})
-    settings_store.save(db, {stamp: t.isoformat()})          # commit ทั้งบันทึกและคิวแจ้งเตือน
-    return True
+    with _alert_lock:                 # ถือไว้เพียงชั่วครู่ ไม่ถือระหว่างเขียนฐานข้อมูล
+        if key in _alert_busy:
+            return False
+        _alert_busy.add(key)
+    try:
+        last = settings_store.load().get(stamp)
+        t = now()
+        if hours > 0 and last:
+            try:
+                if (t - datetime.fromisoformat(last)).total_seconds() < hours * 3600:
+                    return False
+            except ValueError:
+                pass
+        db.add(AuditLog(username="system", action="alert", detail=text[:2000]))
+        emit(db, "system", payload={"text": text})
+        settings_store.save(db, {stamp: t.isoformat()})          # commit ทั้งบันทึกและคิวแจ้งเตือน
+        return True
+    finally:
+        with _alert_lock:
+            _alert_busy.discard(key)
 
 
 def _ready(db, kind, round_id, dept_id, events, t) -> bool:
@@ -358,8 +371,10 @@ def flush(force: bool = False) -> int:
                     _deliver(db, channels, kind, did, msg)
             except Exception:
                 log.exception("notify build")
-            for e in evs:
-                e.done = True
+            # ทำเครื่องหมายด้วยคำสั่งเดียวตามเลขที่: ถ้าผู้ดูแลเพิ่งลบรอบหรือล้างข้อมูลทดสอบระหว่างที่กำลังส่ง
+            # เหตุการณ์ที่ถูกลบไปแล้วจะถูกข้ามเฉย ๆ ไม่ทำให้รอบการส่งนี้ล้ม
+            ids = [e.id for e in evs]
+            db.query(NotifyEvent).filter(NotifyEvent.id.in_(ids)).update({"done": True}, synchronize_session=False)
             db.commit()
         # เก็บกวาด: เหตุการณ์ที่ส่งแล้วเกิน 3 วัน และบันทึกการส่งเกิน 30 วัน
         db.query(NotifyEvent).filter(NotifyEvent.done.is_(True),

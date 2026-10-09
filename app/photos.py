@@ -91,7 +91,7 @@ def create_photo(db, s: dict, *, rnd: Round, department_id: int, raw: bytes, are
               image_bytes=len(img["image"]), thumb_bytes=len(img["thumb"]), status="pending",
               source=source if source in SOURCES else "mobile", camera_id=camera_id,
               after_of=int(after_of) if after_of else None, review_flag=False,
-              area_id=area.id if area is not None else None, verified_by="")
+              area_id=area.id if area is not None else None, verified_by="", queued_at=now())
     db.add(p)
     db.flush()
     db.add(PhotoImage(photo_id=p.id, data=img["image"]))

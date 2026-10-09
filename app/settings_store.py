@@ -9,8 +9,9 @@ DEFAULTS = {
     # AI หลัก / AI สำรอง : none | gemini | openai | demo
     "ai1_type": "none", "ai1_base": "", "ai1_key": "", "ai1_model": "",
     "ai2_type": "none", "ai2_base": "", "ai2_key": "", "ai2_model": "",
+    "ai3_type": "none", "ai3_base": "", "ai3_key": "", "ai3_model": "",      # AI สำรองตัวที่ 2 (รุ่น 1.8)
     "ai_rpm": 6,              # เรียก AI ได้กี่ครั้งต่อนาที
-    "ai_daily": 200,          # เพดานต่อวัน (กันชนโควตาฟรี)
+    "ai_daily": 200,          # เพดานต่อวันของ AI หลัก (กันชนโควตาฟรี, 0 = ไม่จำกัด)
     "ai_max_attempts": 4,
     "img_max_side": 1280,     # ด้านยาวสุดของภาพที่เก็บ (px)
     "img_quality": 78,
@@ -72,6 +73,16 @@ DEFAULTS = {
     "gallery_stale": "flag",          # ภาพที่เก่าเกิน: flag = รับแต่ติดป้ายให้กรรมการเห็น | reject = ไม่รับ
     "dept_remind_days": 3,            # เตือนแผนกที่ยังส่งไม่ครบ ก่อนวันสิ้นสุดรอบกี่วัน (0 = ไม่เตือน)
     "tv_group": "",                   # จอแสดงผล: แสดงเฉพาะกลุ่มนี้ (ว่าง = ทุกแผนก)
+    # ---- รุ่น 1.8: คิววิเคราะห์
+    "ai_workers": 2,                  # วิเคราะห์พร้อมกันกี่ภาพ (1-4) อัตราต่อนาทีที่ตั้งไว้ยังเป็นเพดานรวม
+    "ai_timeout": 90,                 # รอคำตอบจาก AI นานสุดกี่วินาทีต่อการเรียกหนึ่งครั้ง
+    "ai2_rpm": 6,                     # AI สำรอง 1: เรียกได้กี่ครั้งต่อนาที
+    "ai2_daily": 0,                   # AI สำรอง 1: เพดานต่อวัน (0 = ไม่จำกัด)
+    "ai3_rpm": 6,                     # AI สำรอง 2
+    "ai3_daily": 0,
+    "keep_awake": "queue",            # กัน host ฟรีหลับ: queue = ขณะคิวยังมีภาพ | hours = เพิ่มช่วงเวลาที่ตั้ง | off
+    "keep_awake_hours": "",           # ช่วงเวลา (เวลาไทย) ที่ให้ระบบตื่นตลอด เช่น 07:00-18:00
+    "queue_alert_min": 30,            # แจ้งผู้ดูแลเมื่อมีภาพรอ AI นานเกินกี่นาที (0 = ไม่แจ้ง)
 }
 
 _lock = threading.Lock()
@@ -94,15 +105,43 @@ def load(force: bool = False) -> dict:
         return dict(data)
 
 
+def _put(db, values: dict):
+    """เขียนค่าตั้งด้วยคำสั่งเดียวต่อคีย์ (มีแล้วแก้ ไม่มีสร้าง) ฐานข้อมูลเป็นผู้ตัดสินเมื่อหลายเธรดเขียนคีย์เดียวกันพร้อมกัน
+
+    แบบเดิมอ่านก่อนแล้วค่อยสร้าง สองเธรดที่สร้างคีย์ใหม่คีย์เดียวกันพร้อมกันจึงชนกันที่ primary key
+    เรียงคีย์ก่อนเขียน เพื่อให้ทุกเธรดล็อกแถวตามลำดับเดียวกัน
+    """
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    else:
+        insert = None
+    rows = [{"key": k, "value": json.dumps(values[k], ensure_ascii=False)} for k in sorted(values)]
+    if not rows:
+        return
+    if insert is None:                          # ฐานข้อมูลชนิดอื่น: ใช้วิธีทั่วไป
+        for r in rows:
+            row = db.get(Setting, r["key"])
+            if row is None:
+                db.add(Setting(**r))
+            else:
+                row.value = r["value"]
+        return
+    stmt = insert(Setting).values(rows)
+    db.execute(stmt.on_conflict_do_update(index_elements=[Setting.key], set_={"value": stmt.excluded.value}))
+
+
 def save(db, values: dict):
+    """บันทึกค่าตั้งและ commit ทุกอย่างที่ค้างใน session นี้ เรียกจากหลายเธรดพร้อมกันได้"""
     global _cache
-    for k, v in values.items():
-        row = db.get(Setting, k)
-        if row is None:
-            db.add(Setting(key=k, value=json.dumps(v, ensure_ascii=False)))
-        else:
-            row.value = json.dumps(v, ensure_ascii=False)
-    db.commit()
+    try:
+        _put(db, values)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     with _lock:
         _cache = None
 

@@ -18,25 +18,48 @@ import httpx
 from .config import AREA_TYPES
 
 MAX_LEVEL = 4
+SLOTS = ("ai1", "ai2", "ai3")       # AI หลัก, AI สำรอง 1, AI สำรอง 2 : คิวลองเรียกตามลำดับนี้
 _transport = None            # ชุดทดสอบใส่ transport จำลองตรงนี้
 
 
 class AIError(Exception):
-    def __init__(self, message: str, retryable: bool = True, retry_after: float = None):
+    """ข้อผิดพลาดจากการเรียก AI
+
+    kind บอกว่าปัญหาอยู่ที่ใคร คิววิเคราะห์ใช้ตัดสินว่าจะทำอย่างไรต่อ
+    - rate      ผู้ให้บริการแจ้งว่าเรียกถี่เกินโควตาต่อนาที (429): พักผู้ให้บริการสั้น ๆ ไม่นับเป็นความผิดของภาพ
+    - quota     โควตาต่อวันหมด (429): ผู้ให้บริการใช้ไม่ได้จนถึงรอบโควตาใหม่ ไม่นับเป็นความผิดของภาพ
+    - transient ขัดข้องชั่วคราว (5xx, ตอบช้า, เครือข่าย): ลองใหม่ได้
+    - config    การตั้งค่าไม่ถูก (key, ชื่อโมเดล, Base URL): ทุกภาพจะเจอเหมือนกันจนกว่าผู้ดูแลจะแก้
+    - parse     AI ตอบมาแต่ใช้ไม่ได้ (ไม่ใช่ JSON, ขาดข้อ): ลองใหม่ได้ นับเป็นความพยายามของภาพ
+    - content   ปัญหาเฉพาะภาพนี้ (โมเดลไม่รับภาพ, ไม่มีเกณฑ์): ลองใหม่ไปก็ไม่ผ่าน
+    """
+
+    def __init__(self, message: str, retryable: bool = True, retry_after: float = None, kind: str = None,
+                 status: int = None):
         super().__init__(message)
         self.retryable = retryable
         self.retry_after = retry_after
+        self.kind = kind or ("transient" if retryable else "content")
+        self.status = status
 
 
 def profiles(s: dict) -> list:
     out = []
-    for slot in ("ai1", "ai2"):
+    for slot in SLOTS:
         kind = (s.get(f"{slot}_type") or "none").strip()
         if kind and kind != "none":
             out.append(dict(slot=slot, type=kind, base=(s.get(f"{slot}_base") or "").strip(),
                             key=(s.get(f"{slot}_key") or "").strip(),
-                            model=(s.get(f"{slot}_model") or "").strip()))
+                            model=(s.get(f"{slot}_model") or "").strip(),
+                            timeout=_timeout_of(s)))
     return out
+
+
+def _timeout_of(s: dict) -> float:
+    try:
+        return float(max(20, min(int(s.get("ai_timeout", 90) or 90), 300)))
+    except (TypeError, ValueError):
+        return 90.0
 
 
 def is_configured(s: dict) -> bool:
@@ -98,8 +121,39 @@ def build_prompt(rubric: list, meta: dict, extra: str = "") -> str:
 
 
 # --------------------------------------------------------------------------- HTTP
-def _client() -> httpx.Client:
-    return httpx.Client(timeout=httpx.Timeout(100.0, connect=15.0), transport=_transport)
+def _client(timeout: float = None) -> httpx.Client:
+    return httpx.Client(timeout=httpx.Timeout(float(timeout or 90.0), connect=15.0), transport=_transport)
+
+
+_DELAY = re.compile(r"(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m(?!s))?\s*(?:(\d+(?:\.\d+)?)\s*s)?\s*(?:(\d+(?:\.\d+)?)\s*ms)?", re.I)
+# สัญญาณว่าโควตาที่หมดคือโควตาต่อวัน: quotaId ของ Gemini (...PerDay...), ข้อความของ Groq (requests per day (RPD)),
+# และ insufficient_quota ของ OpenAI ห้ามใช้คำว่า billing เพราะ Gemini ใส่คำนี้ในข้อความ 429 ทุกแบบ รวมถึงแบบต่อนาที
+_DAILY = re.compile(r"per\s*day|perday|\bdaily\b|\(RPD\)|\(TPD\)|insufficient_quota", re.I)
+
+
+def parse_delay(text: str):
+    """เวลาที่ผู้ให้บริการขอให้รอ เป็นวินาที รับได้ทั้ง 34.5s, 7m12.5s, 1h2m3s, 450ms คืน None ถ้าอ่านไม่ได้"""
+    m = _DELAY.fullmatch((text or "").strip().strip('"\''))
+    if not m or not any(m.groups()):
+        return None
+    h, mi, sec, ms = [float(x) if x else 0.0 for x in m.groups()]
+    return h * 3600 + mi * 60 + sec + ms / 1000
+
+
+def retry_hint(r: httpx.Response):
+    """หาเวลาที่ควรรอจากคำตอบ 429: retryDelay ของ Gemini, ข้อความ try again in ... ของ Groq/OpenAI, หรือ header retry-after"""
+    body = r.text or ""
+    found = []
+    for pat in (r'"retryDelay"\s*:\s*"([^"]+)"', r"retry(?:ing)?\s+(?:in|after)\s+([\dhms.\s]+?)(?=[^\dhms.\s]|$)",
+                r"try\s+again\s+in\s+([\dhms.\s]+?)(?=[^\dhms.\s]|$)"):
+        for m in re.finditer(pat, body, re.I):
+            v = parse_delay(m.group(1).rstrip(". "))
+            if v is not None:
+                found.append(v)
+    head = (r.headers.get("retry-after") or "").strip()
+    if head.replace(".", "", 1).isdigit():
+        found.append(float(head))
+    return max(found) if found else None
 
 
 def _http_error(r: httpx.Response) -> AIError:
@@ -116,36 +170,39 @@ def _http_error(r: httpx.Response) -> AIError:
     msg = (msg or r.text or "")[:300]
     code = r.status_code
     if code == 429:
-        wait = None
-        m = re.search(r"retry(?:Delay)?[\"':\s]+(?:in\s+)?([\d.]+)\s*s", r.text or "", re.I)
-        if m:
-            wait = float(m.group(1))
-        elif r.headers.get("retry-after", "").replace(".", "", 1).isdigit():
-            wait = float(r.headers["retry-after"])
-        return AIError(f"ผู้ให้บริการ AI แจ้งว่าเกินโควตาหรือเรียกถี่เกินไป (429) {msg}",
-                       retryable=True, retry_after=min(max(wait or 60, 10), 3600))
+        wait = retry_hint(r)
+        daily = bool(_DAILY.search(r.text or ""))
+        if daily:
+            return AIError(f"โควตาต่อวันของผู้ให้บริการ AI หมดแล้ว (429) {msg}", retryable=True, retry_after=wait,
+                           kind="quota", status=code)
+        return AIError(f"ผู้ให้บริการ AI แจ้งว่าเกินโควตาหรือเรียกถี่เกินไป (429) {msg}", retryable=True,
+                       retry_after=wait, kind="rate", status=code)
     if code in (408, 409, 425, 500, 502, 503, 504, 529):
-        return AIError(f"ผู้ให้บริการ AI ขัดข้องชั่วคราว ({code}) {msg}", retryable=True)
-    hint = ""
-    if code in (401, 403):
-        hint = " ตรวจ API key ในหน้าตั้งค่า"
-    elif code == 404:
-        hint = " ตรวจชื่อโมเดลและ Base URL ในหน้าตั้งค่า"
+        return AIError(f"ผู้ให้บริการ AI ขัดข้องชั่วคราว ({code}) {msg}", retryable=True, kind="transient", status=code)
+    hint, kind = "", "content"
+    if code in (401, 402, 403):
+        hint, kind = " ตรวจ API key ในหน้าตั้งค่า", "config"
+    elif code in (404, 405):
+        hint, kind = " ตรวจชื่อโมเดลและ Base URL ในหน้าตั้งค่า", "config"
+    elif code == 400 and re.search(r"api[ _-]?key|model|permission|billing|deprecated|not (?:found|supported|available)|no longer",
+                                   msg, re.I):
+        kind = "config"                 # Gemini ตอบ 400 เมื่อ key ไม่ถูกต้อง หรือโมเดลถูกยกเลิก
     # ผู้ให้บริการมักบอกชื่อรุ่นที่ใช้แทนรุ่นที่เลิกให้บริการ: ยกขึ้นมาเป็นคำแนะนำที่ทำตามได้ทันที
     better = re.search(r"use (?:models/)?([A-Za-z0-9][\w.\-]*(?:flash|pro|lite)[\w.\-]*)", msg)
     if code in (400, 404) and better:
         hint = (f" วิธีแก้: พิมพ์ {better.group(1).rstrip('.')} ในช่องโมเดล กดทดสอบอีกครั้ง แล้วบันทึกการตั้งค่า")
-    return AIError(f"ผู้ให้บริการ AI ปฏิเสธคำขอ ({code}) {msg}{hint}", retryable=False)
+        kind = "config"
+    return AIError(f"ผู้ให้บริการ AI ปฏิเสธคำขอ ({code}) {msg}{hint}", retryable=False, kind=kind, status=code)
 
 
-def _post(url: str, headers: dict, body: dict) -> httpx.Response:
+def _post(url: str, headers: dict, body: dict, timeout: float = None) -> httpx.Response:
     try:
-        with _client() as c:
+        with _client(timeout) as c:
             return c.post(url, headers=headers, json=body)
     except httpx.TimeoutException:
-        raise AIError("ผู้ให้บริการ AI ตอบช้าเกินเวลาที่กำหนด", retryable=True)
+        raise AIError("ผู้ให้บริการ AI ตอบช้าเกินเวลาที่กำหนด", retryable=True, kind="transient")
     except httpx.HTTPError as e:
-        raise AIError(f"เชื่อมต่อผู้ให้บริการ AI ไม่ได้: {type(e).__name__}", retryable=True)
+        raise AIError(f"เชื่อมต่อผู้ให้บริการ AI ไม่ได้: {type(e).__name__}", retryable=True, kind="transient")
 
 
 def _gemini_base(cfg):
@@ -154,10 +211,10 @@ def _gemini_base(cfg):
 
 def _call_gemini(cfg: dict, system: str, user: str, image: bytes = None) -> str:
     if not cfg["key"]:
-        raise AIError("ยังไม่ได้ใส่ API key ของ Gemini", retryable=False)
+        raise AIError("ยังไม่ได้ใส่ API key ของ Gemini", retryable=False, kind="config")
     model = cfg["model"].removeprefix("models/")
     if not model:
-        raise AIError("ยังไม่ได้เลือกโมเดลของ Gemini", retryable=False)
+        raise AIError("ยังไม่ได้เลือกโมเดลของ Gemini", retryable=False, kind="config")
     parts = []
     if image:
         parts.append({"inline_data": {"mime_type": "image/jpeg",
@@ -168,31 +225,31 @@ def _call_gemini(cfg: dict, system: str, user: str, image: bytes = None) -> str:
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json",
                                  "maxOutputTokens": 8192}}
     r = _post(f"{_gemini_base(cfg)}/v1beta/models/{model}:generateContent",
-              {"x-goog-api-key": cfg["key"]}, body)
+              {"x-goog-api-key": cfg["key"]}, body, cfg.get("timeout"))
     if r.status_code != 200:
         raise _http_error(r)
     try:
         data = r.json()
     except Exception:
-        raise AIError("คำตอบจาก Gemini อ่านไม่ได้", retryable=True)
+        raise AIError("คำตอบจาก Gemini อ่านไม่ได้", retryable=True, kind="parse")
     block = (data.get("promptFeedback") or {}).get("blockReason")
     if block:
-        raise AIError(f"โมเดลไม่รับภาพนี้ ({block})", retryable=False)
+        raise AIError(f"โมเดลไม่รับภาพนี้ ({block})", retryable=False, kind="content")
     cands = data.get("candidates") or []
     if not cands:
-        raise AIError("โมเดลไม่ส่งคำตอบกลับมา", retryable=True)
+        raise AIError("โมเดลไม่ส่งคำตอบกลับมา", retryable=True, kind="parse")
     content = cands[0].get("content") or {}
     text = "".join(p.get("text", "") for p in content.get("parts") or [] if not p.get("thought"))
     if not text.strip():
-        raise AIError(f"โมเดลส่งคำตอบว่าง ({cands[0].get('finishReason', '-')})", retryable=True)
+        raise AIError(f"โมเดลส่งคำตอบว่าง ({cands[0].get('finishReason', '-')})", retryable=True, kind="parse")
     return text
 
 
 def _call_openai(cfg: dict, system: str, user: str, image: bytes = None) -> str:
     if not cfg["base"]:
-        raise AIError("ยังไม่ได้ใส่ Base URL ของผู้ให้บริการ", retryable=False)
+        raise AIError("ยังไม่ได้ใส่ Base URL ของผู้ให้บริการ", retryable=False, kind="config")
     if not cfg["model"]:
-        raise AIError("ยังไม่ได้ใส่ชื่อโมเดล", retryable=False)
+        raise AIError("ยังไม่ได้ใส่ชื่อโมเดล", retryable=False, kind="config")
     if image:
         content = [{"type": "text", "text": user},
                    {"type": "image_url", "image_url": {
@@ -205,20 +262,20 @@ def _call_openai(cfg: dict, system: str, user: str, image: bytes = None) -> str:
             "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {cfg['key']}"} if cfg["key"] else {}
     url = cfg["base"].rstrip("/") + "/chat/completions"
-    r = _post(url, headers, body)
+    r = _post(url, headers, body, cfg.get("timeout"))
     if r.status_code == 400 and any(x in (r.text or "") for x in ("response_format", "json_validate_failed", "reasoning_format")):
         body.pop("response_format")            # บางเจ้าหรือบางรุ่นไม่รองรับโหมด JSON: ขอแบบข้อความแล้วแยก JSON เอง
-        r = _post(url, headers, body)
+        r = _post(url, headers, body, cfg.get("timeout"))
     if r.status_code != 200:
         raise _http_error(r)
     try:
         msg = r.json()["choices"][0]["message"]["content"]
     except Exception:
-        raise AIError("คำตอบจากผู้ให้บริการ AI อ่านไม่ได้", retryable=True)
+        raise AIError("คำตอบจากผู้ให้บริการ AI อ่านไม่ได้", retryable=True, kind="parse")
     if isinstance(msg, list):
         msg = "".join(p.get("text", "") for p in msg if isinstance(p, dict))
     if not (msg or "").strip():
-        raise AIError("โมเดลส่งคำตอบว่าง", retryable=True)
+        raise AIError("โมเดลส่งคำตอบว่าง", retryable=True, kind="parse")
     return msg
 
 
@@ -227,7 +284,7 @@ def call(cfg: dict, system: str, user: str, image: bytes = None) -> str:
         return _call_gemini(cfg, system, user, image)
     if cfg["type"] == "openai":
         return _call_openai(cfg, system, user, image)
-    raise AIError(f"ไม่รู้จักผู้ให้บริการ AI ชนิด {cfg['type']}", retryable=False)
+    raise AIError(f"ไม่รู้จักผู้ให้บริการ AI ชนิด {cfg['type']}", retryable=False, kind="config")
 
 
 _VISION_HINTS = ("scout", "maverick", "vision", "llava", "pixtral", "-vl", "vl-", "qvq", "gemma-3", "gemma3", "llama-4", "llama4",
@@ -336,11 +393,20 @@ def list_models(cfg: dict) -> list:
                 if r.status_code != 200:
                     raise _http_error(r)
                 # ผู้ให้บริการที่บอกชนิดข้อมูลเข้า (เช่น OpenRouter) ให้เหลือเฉพาะรุ่นที่รับภาพได้ และเอารุ่นฟรีขึ้นก่อน
-                def sees_images(m: dict) -> bool:
+                def declared(m: dict):
+                    """ผู้ให้บริการบอกเองหรือไม่ว่ารุ่นนี้รับภาพได้: True / False / None = ไม่บอก
+
+                    OpenRouter บอกใน architecture.input_modalities ส่วน Mistral บอกใน capabilities.vision
+                    """
                     kinds = (m.get("architecture") or {}).get("input_modalities")
-                    return not isinstance(kinds, list) or "image" in kinds
-                data = [m for m in r.json().get("data", []) if m.get("id") and sees_images(m)]
-                known = {m["id"] for m in data if isinstance((m.get("architecture") or {}).get("input_modalities"), list)}
+                    if isinstance(kinds, list):
+                        return "image" in kinds
+                    caps = m.get("capabilities")
+                    if isinstance(caps, dict) and isinstance(caps.get("vision"), bool):
+                        return caps["vision"] and caps.get("completion_chat", True) is not False
+                    return None
+                data = [m for m in r.json().get("data", []) if m.get("id") and declared(m) is not False]
+                known = {m["id"] for m in data if declared(m) is True}
                 cfg["_known_vision"] = sorted(known)
                 ids = [m["id"] for m in data]
                 # รุ่นที่น่าจะรับภาพได้ขึ้นก่อน รุ่นที่ไม่ใช่โมเดลสนทนา (เสียง ตัวกรอง) ไปท้ายสุด
@@ -360,13 +426,13 @@ def extract_json(text: str) -> dict:
     t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t, flags=re.I).strip()
     a, b = t.find("{"), t.rfind("}")
     if a < 0 or b <= a:
-        raise AIError("AI ไม่ได้ตอบเป็น JSON", retryable=True)
+        raise AIError("AI ไม่ได้ตอบเป็น JSON", retryable=True, kind="parse")
     try:
         data = json.loads(t[a:b + 1])
     except Exception:
-        raise AIError("JSON จาก AI ไม่สมบูรณ์", retryable=True)
+        raise AIError("JSON จาก AI ไม่สมบูรณ์", retryable=True, kind="parse")
     if not isinstance(data, dict):
-        raise AIError("JSON จาก AI ไม่ใช่โครงสร้างที่กำหนด", retryable=True)
+        raise AIError("JSON จาก AI ไม่ใช่โครงสร้างที่กำหนด", retryable=True, kind="parse")
     return data
 
 
@@ -407,7 +473,7 @@ def normalize(data: dict, rubric: list) -> dict:
     for c in rubric:
         item = got.get(c["code"].upper())
         if item is None:
-            raise AIError(f"คำตอบของ AI ขาดเกณฑ์ {c['code']}", retryable=True)
+            raise AIError(f"คำตอบของ AI ขาดเกณฑ์ {c['code']}", retryable=True, kind="parse")
         na = item.get("na") is True or str(item.get("na")).lower() == "true"
         level = None
         if na and not c.get("allow_na"):
@@ -416,9 +482,9 @@ def normalize(data: dict, rubric: list) -> dict:
             try:
                 level = int(round(float(item.get("level"))))
             except Exception:
-                raise AIError(f"AI ไม่ได้ให้ระดับของเกณฑ์ {c['code']}", retryable=True)
+                raise AIError(f"AI ไม่ได้ให้ระดับของเกณฑ์ {c['code']}", retryable=True, kind="parse")
             if level < 0 or level > MAX_LEVEL:
-                raise AIError(f"ระดับของเกณฑ์ {c['code']} อยู่นอกช่วง 0-4", retryable=True)
+                raise AIError(f"ระดับของเกณฑ์ {c['code']} อยู่นอกช่วง 0-4", retryable=True, kind="parse")
         out["criteria"].append(dict(
             code=c["code"], name=c["name"], max=float(c["max"]), na=na, level=level,
             score=0.0 if na else score_of(c["max"], level),
@@ -446,27 +512,50 @@ def demo_result(image: bytes, rubric: list) -> dict:
 
 
 # --------------------------------------------------------------------------- งานหลัก
-def analyze(image: bytes, rubric: list, meta: dict, s: dict, on_call=None) -> tuple:
-    """คืน (ผลที่ตรวจแล้ว, ชนิดผู้ให้บริการ, ชื่อโมเดล) — ลอง AI หลักก่อน ถ้าไม่ได้จึงใช้ AI สำรอง"""
-    profs = profiles(s)
-    if not profs:
-        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False)
-    if not rubric:
-        raise AIError("รอบนี้ยังไม่มีเกณฑ์การให้คะแนน", retryable=False)
-    user = build_prompt(rubric, meta, s.get("ai_extra") or "")
+def _run(cfg: dict, fn, on_call=None):
+    """เรียกผู้ให้บริการหนึ่งครั้ง แล้วแจ้งผลให้ตัวนับ (on_call(cfg, None) = สำเร็จ, on_call(cfg, error) = ไม่สำเร็จ)"""
+    try:
+        out = fn()
+    except AIError as e:
+        if on_call:
+            on_call(cfg, e)
+        raise
+    if on_call:
+        on_call(cfg, None)
+    return out
+
+
+def _first_working(profs: list, attempt) -> tuple:
+    """ลองผู้ให้บริการตามลำดับ (หลักก่อน แล้วจึงสำรอง) ใช้กับงานที่ไม่ได้ผ่านคิว เช่น ปุ่มทดสอบ และสรุปของแผนก"""
     errors = []
     for cfg in profs:
         try:
-            if cfg["type"] == "demo":
-                return demo_result(image, rubric), "demo", "demo"
-            if on_call:
-                on_call()
-            text = call(cfg, SYSTEM_PROMPT, user, image)
-            return normalize(extract_json(text), rubric), cfg["type"], cfg["model"]
+            return attempt(cfg)
         except AIError as e:
             errors.append(e)
     retry = [e for e in errors if e.retryable]
     raise (retry[0] if retry else errors[-1])
+
+
+def analyze_with(cfg: dict, image: bytes, rubric: list, meta: dict, s: dict, on_call=None) -> dict:
+    """โหมดระดับ: ให้ผู้ให้บริการรายนี้ประเมินภาพหนึ่งครั้ง คืนผลที่ตรวจรูปแบบแล้ว"""
+    if not rubric:
+        raise AIError("รอบนี้ยังไม่มีเกณฑ์การให้คะแนน", retryable=False, kind="content")
+    if cfg["type"] == "demo":
+        return demo_result(image, rubric)
+    user = build_prompt(rubric, meta, s.get("ai_extra") or "")
+    return _run(cfg, lambda: normalize(extract_json(call(cfg, SYSTEM_PROMPT, user, image)), rubric), on_call)
+
+
+def analyze(image: bytes, rubric: list, meta: dict, s: dict, on_call=None) -> tuple:
+    """คืน (ผลที่ตรวจแล้ว, ชนิดผู้ให้บริการ, ชื่อโมเดล) — ลอง AI หลักก่อน ถ้าไม่ได้จึงใช้ AI สำรอง"""
+    profs = profiles(s)
+    if not profs:
+        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False, kind="config")
+    if not rubric:
+        raise AIError("รอบนี้ยังไม่มีเกณฑ์การให้คะแนน", retryable=False, kind="content")
+    return _first_working(profs, lambda cfg: (analyze_with(cfg, image, rubric, meta, s, on_call),
+                                              cfg["type"], cfg["model"] if cfg["type"] != "demo" else "demo"))
 
 
 def merge_passes(a: dict, b: dict) -> tuple:
@@ -595,12 +684,12 @@ def normalize_checks(data: dict, checks: list) -> dict:
     for k in checks:
         item = got.get(k["code"].upper())
         if item is None:
-            raise AIError(f"คำตอบของ AI ขาดข้อ {k['code']}", retryable=True)
+            raise AIError(f"คำตอบของ AI ขาดข้อ {k['code']}", retryable=True, kind="parse")
         status = _STATUS_WORDS.get(str(item.get("status") or "").strip().lower())
         if status is None:
-            raise AIError(f"สถานะของข้อ {k['code']} ไม่ใช่ค่าที่กำหนด", retryable=True)
+            raise AIError(f"สถานะของข้อ {k['code']} ไม่ใช่ค่าที่กำหนด", retryable=True, kind="parse")
         if status == "na" and not k.get("allow_na", True):
-            raise AIError(f"ข้อ {k['code']} ต้องตัดสินเสมอ แต่ AI ตอบว่ามองไม่เห็น", retryable=True)
+            raise AIError(f"ข้อ {k['code']} ต้องตัดสินเสมอ แต่ AI ตอบว่ามองไม่เห็น", retryable=True, kind="parse")
         ng = status in ("minor", "major")
         out["checks"].append(dict(
             code=k["code"], text=k["text"], crit=k["crit"], max=float(k["points"]), minor=float(k["minor"]),
@@ -624,27 +713,27 @@ def demo_checks(image: bytes, checks: list) -> dict:
                                  top_actions=["ตั้งค่า AI จริงในหน้าตั้งค่า"], checks=items), checks)
 
 
+def check_with(cfg: dict, image: bytes, checks: list, meta: dict, s: dict, on_call=None) -> dict:
+    """โหมดรายการตรวจ: ให้ผู้ให้บริการรายนี้ตรวจภาพหนึ่งครั้ง คืนสถานะรายข้อที่ตรวจรูปแบบแล้ว (ยังไม่มีคะแนน)"""
+    if not checks:
+        raise AIError("รอบนี้ไม่มีรายการตรวจที่ใช้กับจุดนี้ เพิ่มรายการตรวจแล้วกด ใช้เกณฑ์ล่าสุดกับรอบนี้", retryable=False,
+                      kind="content")
+    if cfg["type"] == "demo":
+        return demo_checks(image, checks)
+    user = build_check_prompt(checks, meta, s.get("ai_extra") or "")
+    return _run(cfg, lambda: normalize_checks(extract_json(call(cfg, CHECK_SYSTEM, user, image)), checks), on_call)
+
+
 def analyze_checklist(image: bytes, checks: list, meta: dict, s: dict, on_call=None) -> tuple:
     """โหมดรายการตรวจ: คืน (สถานะรายข้อที่ตรวจรูปแบบแล้ว, ชนิดผู้ให้บริการ, ชื่อโมเดล) ยังไม่มีคะแนน"""
     profs = profiles(s)
     if not profs:
-        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False)
+        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False, kind="config")
     if not checks:
-        raise AIError("รอบนี้ไม่มีรายการตรวจที่ใช้กับจุดนี้ เพิ่มรายการตรวจแล้วกด ใช้เกณฑ์ล่าสุดกับรอบนี้", retryable=False)
-    user = build_check_prompt(checks, meta, s.get("ai_extra") or "")
-    errors = []
-    for cfg in profs:
-        try:
-            if cfg["type"] == "demo":
-                return demo_checks(image, checks), "demo", "demo"
-            if on_call:
-                on_call()
-            text = call(cfg, CHECK_SYSTEM, user, image)
-            return normalize_checks(extract_json(text), checks), cfg["type"], cfg["model"]
-        except AIError as e:
-            errors.append(e)
-    retry = [e for e in errors if e.retryable]
-    raise (retry[0] if retry else errors[-1])
+        raise AIError("รอบนี้ไม่มีรายการตรวจที่ใช้กับจุดนี้ เพิ่มรายการตรวจแล้วกด ใช้เกณฑ์ล่าสุดกับรอบนี้", retryable=False,
+                      kind="content")
+    return _first_working(profs, lambda cfg: (check_with(cfg, image, checks, meta, s, on_call),
+                                              cfg["type"], cfg["model"] if cfg["type"] != "demo" else "demo"))
 
 
 def merge_check_passes(a: dict, b: dict) -> tuple:
@@ -682,31 +771,33 @@ def summarize(payload: dict, s: dict, on_call=None) -> tuple:
     """สรุปคำแนะนำระดับแผนกจากผลของทุกภาพ (เรียก AI แบบข้อความล้วน)"""
     profs = profiles(s)
     if not profs:
-        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False)
+        raise AIError("ยังไม่ได้ตั้งค่า AI", retryable=False, kind="config")
     user = ("ข้อมูลผลการตรวจ 5ส ของแผนกหนึ่ง (JSON)\n" + json.dumps(payload, ensure_ascii=False)[:24000] +
             '\n\nตอบเป็น JSON โครงสร้างนี้เท่านั้น\n{"overview": "ภาพรวม 2-3 ประโยค", '
             '"strengths": ["จุดแข็ง ไม่เกิน 3 ข้อ"], '
             '"priorities": [{"issue": "ปัญหาที่พบซ้ำ", "action": "สิ่งที่ต้องทำ", "where": "จุดที่พบ"}]}\n'
             "priorities ไม่เกิน 5 ข้อ เรียงตามผลต่อคะแนนมากไปน้อย")
+
+    def one(cfg):
+        if cfg["type"] == "demo":
+            weakest = min(payload.get("criteria") or [{"name": "-", "avg_percent": 0}],
+                          key=lambda c: c.get("avg_percent") or 0)
+            return (dict(overview="โหมดทดลอง: สรุปนี้สร้างจากตัวเลขคะแนน ไม่ได้มาจาก AI จริง",
+                         strengths=[], priorities=[dict(issue=f"เกณฑ์ที่คะแนนต่ำสุดคือ {weakest['name']}",
+                                                        action="ตั้งค่า AI จริงเพื่อรับคำแนะนำ", where="-")]), "demo")
+        data = _run(cfg, lambda: extract_json(call(cfg, SUMMARY_SYSTEM, user)), on_call)
+        pri = []
+        for p in (data.get("priorities") or [])[:5]:
+            if isinstance(p, dict):
+                pri.append(dict(issue=str(p.get("issue") or "")[:300], action=str(p.get("action") or "")[:400],
+                                where=str(p.get("where") or "")[:200]))
+        return (dict(overview=str(data.get("overview") or "")[:900],
+                     strengths=_strs(data.get("strengths"), 3), priorities=pri), cfg["model"])
+
     errors = []
     for cfg in profs:
         try:
-            if cfg["type"] == "demo":
-                weakest = min(payload.get("criteria") or [{"name": "-", "avg_percent": 0}],
-                              key=lambda c: c.get("avg_percent") or 0)
-                return (dict(overview="โหมดทดลอง: สรุปนี้สร้างจากตัวเลขคะแนน ไม่ได้มาจาก AI จริง",
-                             strengths=[], priorities=[dict(issue=f"เกณฑ์ที่คะแนนต่ำสุดคือ {weakest['name']}",
-                                                            action="ตั้งค่า AI จริงเพื่อรับคำแนะนำ", where="-")]), "demo")
-            if on_call:
-                on_call()
-            data = extract_json(call(cfg, SUMMARY_SYSTEM, user))
-            pri = []
-            for p in (data.get("priorities") or [])[:5]:
-                if isinstance(p, dict):
-                    pri.append(dict(issue=str(p.get("issue") or "")[:300], action=str(p.get("action") or "")[:400],
-                                    where=str(p.get("where") or "")[:200]))
-            return (dict(overview=str(data.get("overview") or "")[:900],
-                         strengths=_strs(data.get("strengths"), 3), priorities=pri), cfg["model"])
+            return one(cfg)
         except AIError as e:
             errors.append(e)
     raise errors[-1]

@@ -15,6 +15,7 @@
     <select data-preset>
       <option value="">เลือกผู้ให้บริการ หรือพิมพ์ Base URL เองด้านล่าง</option>
       <option value="https://api.groq.com/openai/v1">Groq (ฟรี ไม่ต้องผูกบัตร)</option>
+      <option value="https://api.mistral.ai/v1">Mistral (แผนฟรี Experiment ต้องยืนยันเบอร์โทร)</option>
       <option value="https://openrouter.ai/api/v1">OpenRouter (รุ่นที่ลงท้าย :free)</option>
       <option value="http://localhost:11434/v1">Ollama บนเครื่องเดียวกับระบบ (ไม่ต้องใช้ key)</option>
     </select></label>
@@ -86,23 +87,59 @@
   <section>
     <h2 style="margin-bottom:10px">AI ที่ใช้วิเคราะห์ภาพ</h2>
     {{ ai_slot('ai1', 'AI หลัก', 'ระบบเรียกตัวนี้ก่อนทุกครั้ง') }}
-    {{ ai_slot('ai2', 'AI สำรอง', 'ใช้เมื่อ AI หลักเกินโควตาหรือขัดข้อง ควรเป็นคนละผู้ให้บริการกับตัวหลัก') }}
+    {{ ai_slot('ai2', 'AI สำรอง 1', 'ใช้ทันทีเมื่อ AI หลักเกินโควตา ขัดข้อง หรือตั้งค่าผิด ควรเป็นคนละผู้ให้บริการกับตัวหลัก') }}
+    {{ ai_slot('ai3', 'AI สำรอง 2', 'ใช้เมื่อทั้ง AI หลักและ AI สำรอง 1 ใช้ไม่ได้ ควรเป็นผู้ให้บริการรายที่สาม ไม่ใส่ก็ได้') }}
     <div class="panel">
       <div class="grid-2">
-        <label class="field"><span>เรียก AI ได้กี่ครั้งต่อนาที <em>ตั้งให้ต่ำกว่าโควตาของ key</em></span><input type="number" name="ai_rpm" value="{{ s.ai_rpm }}" min="1" max="60"></label>
-        <label class="field"><span>เพดานต่อวัน <em>วันนี้ใช้ไป {{ used_today }} ครั้ง</em></span><input type="number" name="ai_daily" value="{{ s.ai_daily }}" min="1"></label>
-        <label class="field"><span>ลองใหม่สูงสุดกี่ครั้งต่อภาพ</span><input type="number" name="ai_max_attempts" value="{{ s.ai_max_attempts }}" min="1" max="10"></label>
+        <label class="field"><span>AI หลัก: เรียกได้กี่ครั้งต่อนาที <em>ตั้งให้ต่ำกว่าโควตาของ key</em></span><input type="number" name="ai_rpm" value="{{ s.ai_rpm }}" min="1" max="60"></label>
+        <label class="field"><span>AI หลัก: เพดานต่อวัน <em>วันนี้ใช้ไป {{ used_today }} ครั้ง, 0 = ไม่จำกัด</em></span><input type="number" name="ai_daily" value="{{ s.ai_daily }}" min="0"></label>
+        <label class="field"><span>AI สำรอง 1: เรียกได้กี่ครั้งต่อนาที</span><input type="number" name="ai2_rpm" value="{{ s.ai2_rpm }}" min="1" max="60"></label>
+        <label class="field"><span>AI สำรอง 1: เพดานต่อวัน <em>วันนี้ใช้ไป {{ used.ai2 }} ครั้ง, 0 = ไม่จำกัด</em></span><input type="number" name="ai2_daily" value="{{ s.ai2_daily }}" min="0"></label>
+        <label class="field"><span>AI สำรอง 2: เรียกได้กี่ครั้งต่อนาที</span><input type="number" name="ai3_rpm" value="{{ s.ai3_rpm }}" min="1" max="60"></label>
+        <label class="field"><span>AI สำรอง 2: เพดานต่อวัน <em>วันนี้ใช้ไป {{ used.ai3 }} ครั้ง, 0 = ไม่จำกัด</em></span><input type="number" name="ai3_daily" value="{{ s.ai3_daily }}" min="0"></label>
+        <label class="field"><span>วิเคราะห์พร้อมกันกี่ภาพ <em>1 ถึง 4 อัตราต่อนาทีข้างบนยังเป็นเพดานรวม</em></span><input type="number" name="ai_workers" value="{{ s.ai_workers }}" min="1" max="4"></label>
+        <label class="field"><span>รอคำตอบจาก AI นานสุดกี่วินาทีต่อครั้ง <em>เกินนี้ถือว่าไม่ตอบ แล้วใช้ AI สำรองหรือลองใหม่</em></span><input type="number" name="ai_timeout" value="{{ s.ai_timeout }}" min="20" max="300"></label>
+        <label class="field"><span>ลองใหม่สูงสุดกี่ครั้งต่อภาพ <em>นับเฉพาะครั้งที่ล้มเหลวเพราะภาพนั้นเอง</em></span><input type="number" name="ai_max_attempts" value="{{ s.ai_max_attempts }}" min="1" max="10"></label>
         <label class="field"><span>จำนวนรอบที่ AI ประเมินต่อภาพ</span>
           <select name="ai_passes">
             <option value="1"{{ ' selected' if s.ai_passes != 2 }}>1 รอบ (ประหยัดโควตา)</option>
             <option value="2"{{ ' selected' if s.ai_passes == 2 }}>2 รอบแล้วเทียบกัน (ใช้โควตาสองเท่า)</option>
           </select></label>
       </div>
+      <details class="edit" style="margin:4px 0 10px">
+        <summary>ผู้ให้บริการฟรีที่ใช้กับโปรแกรมนี้ได้ และวิธีตั้งอัตรา</summary>
+        <div class="table-wrap" style="margin-top:8px"><table>
+          <tr><th>ผู้ให้บริการ</th><th>วิธีใส่ในโปรแกรม</th><th>ข้อควรรู้ของแผนฟรี</th></tr>
+          <tr><td>Google Gemini<br><span class="muted">aistudio.google.com</span></td><td>ผู้ให้บริการ: Google Gemini ใส่ API key แล้วกดดึงรายชื่อโมเดล เลือกรุ่น Flash</td><td>โควตาต่างกันตามรุ่น ดูตัวเลขของ key ที่เมนู Rate Limit โควตาต่อวันเริ่มรอบใหม่ประมาณ 14:00 ถึง 15:00 น. เวลาไทย</td></tr>
+          <tr><td>Groq<br><span class="muted">console.groq.com</span></td><td>ผู้ให้บริการ: แบบ OpenAI-compatible เลือก Groq กดดึงรายชื่อโมเดล ระบบจะทดสอบว่ารุ่นใดรับภาพได้</td><td>จำกัดจำนวนคำต่อนาทีด้วย ภาพหนึ่งใบพร้อมรายการตรวจใช้มาก จึงควรตั้งอัตราไว้ 1 ถึง 2 ครั้งต่อนาที ดูตัวเลขจริงที่ Settings, Limits</td></tr>
+          <tr><td>Mistral<br><span class="muted">console.mistral.ai</span></td><td>ผู้ให้บริการ: แบบ OpenAI-compatible เลือก Mistral กดดึงรายชื่อโมเดล เลือกรุ่นที่รับภาพได้</td><td>แผน Experiment ต้องยืนยันเบอร์โทร และข้อมูลที่ส่งอาจถูกใช้ฝึกโมเดล เริ่มที่ 6 ครั้งต่อนาที</td></tr>
+          <tr><td>OpenRouter<br><span class="muted">openrouter.ai</span></td><td>ผู้ให้บริการ: แบบ OpenAI-compatible เลือก OpenRouter เลือกรุ่นที่ลงท้าย :free</td><td>รุ่นฟรีได้ประมาณ 50 ครั้งต่อวัน ตั้งเพดานต่อวันไว้ 45 เหมาะเป็นตัวสุดท้าย</td></tr>
+        </table></div>
+        <p class="muted" style="margin-top:8px">ตัวเลขของแผนฟรีเปลี่ยนได้โดยผู้ให้บริการ ให้ยึดตัวเลขในหน้าบัญชีของ key เสมอ ทุกช่องกด ทดสอบด้วยภาพตัวอย่าง ก่อนบันทึก ถ้าตั้งอัตราสูงเกินจริง ระบบจะชะลอเองเมื่อถูกแจ้งว่าเรียกถี่เกิน แต่จะเสียเวลารอ ภาพที่ได้คะแนนจาก AI สำรองจะมีป้ายบอก และสั่งให้ AI หลักวิเคราะห์ใหม่ได้ที่หน้า คิววิเคราะห์ เพื่อให้ทุกแผนกถูกวัดด้วยโมเดลเดียวกัน</p>
+      </details>
       <p class="muted">แบบ 2 รอบ: ถ้าสองรอบให้ระดับต่างกัน ระบบยึดระดับที่ต่ำกว่า และถ้าต่างกันมาก จะติดป้ายให้กรรมการตรวจภาพนั้น ช่วยจับภาพที่ AI ตัดสินไม่นิ่ง</p>
       <label class="field"><span>มาตรฐานเฉพาะของโรงงานที่ต้องการให้ AI ยึด <em>ไม่บังคับ ใช้กับทุกเกณฑ์และทุกภาพ</em></span>
         <textarea name="ai_extra" rows="4" maxlength="3000" placeholder="เช่น ทางเดินต้องมีเส้นสีเหลืองกว้าง 10 ซม. ถังขยะแยกสี: เขียวทั่วไป เหลืองรีไซเคิล แดงอันตราย พาเลทวางซ้อนได้ไม่เกิน 3 ชั้น">{{ s.ai_extra }}</textarea></label>
-      <p class="muted">โควตาฟรีของแต่ละ key ดูได้ในหน้าบัญชีของผู้ให้บริการ (Gemini: aistudio.google.com เมนู Rate limit) ถ้าเกินโควตา ภาพจะรอในคิวและระบบลองใหม่เอง ไม่มีการคิดเงิน ตราบใดที่ key นั้นไม่ได้ผูกการชำระเงิน</p>
+      <p class="muted">โควตาฟรีของแต่ละ key ดูได้ในหน้าบัญชีของผู้ให้บริการ (Gemini: aistudio.google.com เมนู Rate limit) ตั้งอัตราต่อนาทีและเพดานต่อวันให้ต่ำกว่าตัวเลขในหน้านั้นเล็กน้อย ถ้า AI หลักเกินโควตา ระบบจะใช้ AI สำรอง 1 แล้วจึง AI สำรอง 2 ตามลำดับทันที ถ้าทุกตัวใช้ไม่ได้ ภาพจะรอในคิวและเดินต่อเองเมื่อโควตากลับมา ไม่มีการคิดเงิน ตราบใดที่ key นั้นไม่ได้ผูกการชำระเงิน เพดานต่อวันนับเฉพาะครั้งที่ AI รับงานไปทำจริง <a href="/admin/queue">ดูสถานะคิวและผู้ให้บริการ</a></p>
     </div>
+  </section>
+
+  <section class="panel">
+    <h2>คิววิเคราะห์และการกัน host หลับ</h2>
+    <p class="muted" style="margin-bottom:10px">host ฟรีอย่าง Render ปิดบริการเมื่อไม่มีคนเปิดเว็บ 15 นาที ภาพที่ยังรอ AI จะไม่ถูกทำต่อจนกว่าจะมีคนเปิดเว็บอีกครั้ง ตัวเลือกนี้ให้ระบบเรียกที่อยู่เว็บของตัวเองทุก 10 นาทีเพื่อไม่ให้หลับในช่วงที่จำเป็น</p>
+    <div class="grid-2">
+      <label class="field"><span>กัน host หลับ</span>
+        <select name="keep_awake">
+          <option value="queue"{{ ' selected' if s.keep_awake == 'queue' }}>เฉพาะขณะที่คิวยังมีภาพค้าง (แนะนำ)</option>
+          <option value="hours"{{ ' selected' if s.keep_awake == 'hours' }}>ขณะคิวมีภาพค้าง และตลอดช่วงเวลาที่ตั้ง</option>
+          <option value="off"{{ ' selected' if s.keep_awake == 'off' }}>ไม่ต้อง (เครื่องในโรงงาน หรือ host ที่ไม่หลับ)</option>
+        </select></label>
+      <label class="field"><span>ช่วงเวลาที่ให้ระบบตื่นตลอด <em>เวลาไทย เช่น 07:00-18:00 ใช้กับตัวเลือกที่สอง</em></span><input name="keep_awake_hours" value="{{ s.keep_awake_hours }}" maxlength="11" placeholder="07:00-18:00" inputmode="numeric"></label>
+      <label class="field"><span>แจ้งผู้ดูแลเมื่อมีภาพรอ AI นานเกินกี่นาที <em>0 = ไม่แจ้ง</em></span><input type="number" name="queue_alert_min" value="{{ s.queue_alert_min }}" min="0" max="1440"></label>
+    </div>
+    {% if awake.url %}<p class="muted">ที่อยู่ที่ระบบใช้เรียกตัวเอง: {{ awake.url }}/healthz ({{ 'host แจ้งมาให้เอง' if awake.source == 'host' else 'จากช่อง ที่อยู่เว็บของระบบ ด้านบน' }}){% if awake.at %} เรียกล่าสุด {{ awake.at|dt }} {{ 'สำเร็จ' if awake.ok else 'ไม่สำเร็จ: ' ~ awake.detail }}{% endif %}</p>
+    {% else %}<p class="note">ระบบยังไม่รู้ที่อยู่เว็บของตัวเอง จึงกัน host หลับไม่ได้ ใส่ ที่อยู่เว็บของระบบ ที่ด้านบนของหน้านี้ (เช่น https://ชื่อบริการ.onrender.com) แล้วบันทึก</p>{% endif %}
+    <p class="muted">ช่วงเวลาที่ตั้งให้ตื่นตลอดใช้ชั่วโมงทำงานของ host ต่อเนื่อง Render แบบฟรีให้เดือนละ 750 ชั่วโมงรวมทุกบริการในบัญชี ตั้งเฉพาะช่วงเวลาทำงานจริง</p>
   </section>
 
   <section class="panel">

@@ -19,7 +19,7 @@ os.environ["ADMIN_PASSWORD"] = "admin1234"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import ai, db as dbm, settings_store, storage, worker  # noqa: E402
+from app import ai, db as dbm, providers, settings_store, storage, worker  # noqa: E402
 from app.main import app  # noqa: E402
 
 AI = {"gemini": "ok", "openai": "ok", "levels": [4, 3, 2, 3, 4], "calls": [], "wrap": False, "image_ok": True, "na": False}
@@ -248,30 +248,39 @@ def test_06_ai_scoring_paths():
     drain()
     assert photo(p3).status == "rejected" and photo(p3).percent is None
     AI["image_ok"] = True
-    # เกินโควตา -> กลับเข้าคิว รอเวลาที่ผู้ให้บริการบอก
+    # เกินโควตาต่อนาที -> ภาพกลับเข้าคิวโดยไม่เสียจำนวนครั้ง ผู้ให้บริการถูกพักตามเวลาที่บอก ทั้งคิวรอพร้อมกัน
     AI["gemini"] = "429"
     p4 = upload(m, rid, d["PRD"], 12, area="ทางเดิน")
-    worker.process_one()
+    assert worker.process_one() is True
     p = photo(p4)
-    assert p.status == "pending" and p.attempts == 1 and p.next_try_at is not None and "429" in p.error
-    assert (p.next_try_at - dbm.now()).total_seconds() > 25
-    assert worker.process_one() is False                                       # ยังไม่ถึงเวลา ไม่เรียกซ้ำ
-    # ตั้ง AI สำรอง แล้วให้ทำงานแทนเมื่อตัวหลักเกินโควตา (และผู้ให้บริการสำรองไม่รองรับโหมด JSON)
+    assert p.status == "pending" and p.attempts == 0 and p.next_try_at is None and "429" in p.error
+    assert worker.process_one() is False                                       # ผู้ให้บริการยังพักอยู่ ไม่เรียกซ้ำ
+    assert "เรียกถี่" in worker.state["paused_reason"] and worker.state["paused_kind"] == "rate"
+    assert 30 < (worker.state["resume_at"] - dbm.now()).total_seconds() < 40    # 34.5 วินาทีตามที่ผู้ให้บริการบอก
+    # ตั้ง AI สำรอง แล้วให้ทำงานแทนทันทีขณะตัวหลักยังพัก (และผู้ให้บริการสำรองไม่รองรับโหมด JSON)
     with dbm.SessionLocal() as s:
         settings_store.save(s, {"ai2_type": "openai", "ai2_base": "https://x.test/v1", "ai2_key": "o-key", "ai2_model": "vision-model-a"})
-        s.get(dbm.Photo, p4).next_try_at = None
-        s.commit()
     AI.update(openai="nojsonmode", levels=[3, 3, 3, 3, 3])
     drain()
     p = photo(p4)
     assert p.status == "done" and p.provider == "openai" and p.model == "vision-model-a" and p.percent == 75.0
-    # key ผิด + ไม่มีตัวสำรอง -> ผิดพลาดทันที ไม่วนลองซ้ำ
+    # key ผิด + ไม่มีตัวสำรอง -> เป็นปัญหาของการตั้งค่า ไม่ใช่ของภาพ: ภาพรอในคิว คิวบอกเหตุผล และแจ้งผู้ดูแล
     with dbm.SessionLocal() as s:
         settings_store.save(s, {"ai2_type": "none"})
+    providers.reset()
     AI["gemini"] = "403"
     p5 = upload(m, rid, d["PRD"], 13, area="ตู้เครื่องมือ")
     drain()
-    assert photo(p5).status == "error" and "API key" in photo(p5).error
+    assert photo(p5).status == "pending" and photo(p5).attempts == 0 and "API key" in photo(p5).error
+    assert worker.state["paused_kind"] == "config" and "API key" in worker.state["paused_reason"]
+    with dbm.SessionLocal() as s:
+        assert s.query(dbm.AuditLog).filter(dbm.AuditLog.action == "alert", dbm.AuditLog.detail.contains("คิววิเคราะห์ภาพหยุดรอ")).count() == 1
+    AI["gemini"] = "ok"
+    assert worker.process_one() is False                                        # แก้ที่ผู้ให้บริการแล้ว แต่คิวยังพักตามรอบ 15 นาที
+    r = S["admin"].post("/admin/queue/kick")                                    # ผู้ดูแลกด เดินคิวเดี๋ยวนี้
+    assert r.status_code == 303 and worker.state["paused_reason"] == ""
+    drain()
+    assert photo(p5).status == "done"
     # คำตอบไม่ใช่ JSON -> ลองใหม่จนครบ 3 ครั้งแล้วจึงผิดพลาด
     AI["gemini"] = "garbage"
     S["admin"].post(f"/admin/photos/{p5}/reanalyze")

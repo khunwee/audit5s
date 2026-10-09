@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}คิววิเคราะห์{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>คิววิเคราะห์</h1><p>ภาพที่ส่งเข้ามาจะรอในคิวนี้จนกว่า AI จะวิเคราะห์เสร็จ หน้านี้บอกว่าคิวเดินอยู่หรือหยุดรอ เพราะอะไร และจะเสร็จเมื่อไร</p></div>
+  {% if can(user, 'rounds') %}
+  <div class="actions no-print">
+    <form method="post" action="/admin/queue/kick"><button class="btn primary">เดินคิวเดี๋ยวนี้</button></form>
+    {% if q.errors %}<form method="post" action="/admin/queue/retry-errors"><button class="btn">วิเคราะห์ภาพที่ไม่สำเร็จใหม่ ({{ q.errors }})</button></form>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% include "admin/_nav.html" %}
+
+<div data-queue-live="{{ q.pending }}:{{ q.processing }}:{{ q.errors }}:{{ '1' if q.paused else '0' }}">
+{% if q.ai_ready and not q.running %}
+  <p class="note red" style="margin-bottom:10px">เธรดของคิววิเคราะห์ไม่ได้ทำงานในโปรเซสนี้ ภาพจะไม่ถูกวิเคราะห์ เริ่มระบบใหม่ และตรวจว่าไม่ได้ตั้ง DISABLE_WORKER=1</p>
+{% endif %}
+{% if not q.ai_ready %}
+  <p class="note">ยังไม่ได้ตั้งค่า AI ภาพที่ส่งเข้ามาจะรอในคิวจนกว่าจะตั้งค่า{% if user.role == 'admin' %} <a href="/admin/settings">ตั้งค่า AI</a>{% endif %}</p>
+{% elif q.paused %}
+  <p class="note red"><b>คิวหยุดรอ</b> {{ q.paused }}{% if q.retry_s is not none %} <span style="white-space:nowrap">(อีก <b data-countdown="{{ q.retry_s }}">{{ dur(q.retry_s) }}</b>)</span>{% endif %}</p>
+{% elif q.pending or q.processing %}
+  <p class="note blue"><b>คิวกำลังเดิน</b> เหลือ {{ q.pending + q.processing }} ภาพ{% if q.eta_s is not none %} คาดว่าหมดในอีกประมาณ <b data-countdown="{{ q.eta_s }}">{{ dur(q.eta_s) }}</b>{% endif %}</p>
+{% else %}
+  <p class="note blue"><b>คิวว่าง</b> ภาพที่ส่งเข้ามาจะถูกวิเคราะห์ทันที</p>
+{% endif %}
+
+<div class="cols cols-2" style="margin-top:14px">
+  <section class="panel">
+    <h2>ภาพในคิว</h2>
+    <dl class="facts">
+      <div><dt>รอวิเคราะห์</dt><dd>{{ q.pending }}</dd></div>
+      <div><dt>กำลังวิเคราะห์</dt><dd>{{ q.processing }}</dd></div>
+      <div><dt>วิเคราะห์ไม่สำเร็จ</dt><dd>{{ q.errors }}</dd></div>
+      <div><dt>รอนานสุด</dt><dd>{% if q.pending or q.processing %}{{ q.waited_min }} นาที{% else %}-{% endif %}</dd></div>
+    </dl>
+    <p style="margin-top:10px">เวลาต่อภาพตอนนี้ประมาณ {{ q.each_s|num }} วินาที{% if q.jobs %} (วัดจาก {{ q.jobs }} ภาพล่าสุดตั้งแต่ระบบเริ่มทำงาน เฉลี่ยภาพละ {{ q.avg_s|num }} วินาที){% else %} (ค่าประมาณ จะแม่นขึ้นเมื่อวิเคราะห์ภาพแรกเสร็จ){% endif %}</p>
+    <p class="muted">เธรดวิเคราะห์ที่ทำงานอยู่ {{ q.workers }} จาก {{ q.workers_want }}{% if q.started_at %}, ระบบเริ่มทำงานเมื่อ {{ q.started_at|dt }}{% endif %}{% if q.last_ok %}, วิเคราะห์สำเร็จล่าสุด {{ q.last_ok|dt }}{% endif %}</p>
+    {% if q.last_error %}<p class="note" style="margin-top:10px">ข้อผิดพลาดล่าสุด: {{ q.last_error }}</p>{% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>การกัน host หลับ</h2>
+    {% set k = q.keepalive %}
+    <p>{{ {'queue': 'เปิด: เฉพาะขณะที่คิวยังมีภาพค้าง', 'hours': 'เปิด: ขณะคิวมีภาพค้าง และช่วงเวลา ' ~ (k.hours or 'ที่ยังไม่ได้ตั้ง'), 'off': 'ปิด'}[k.mode] }}</p>
+    {% if k.mode != 'off' %}
+      {% if k.url %}
+      <p class="muted">ที่อยู่ที่ระบบเรียกตัวเอง: {{ k.url }}/healthz{% if k.at %}<br>เรียกล่าสุด {{ k.at|dt }}: {{ 'สำเร็จ' if k.ok else 'ไม่สำเร็จ (' ~ k.detail ~ ')' }}, เรียกไปแล้ว {{ k.count }} ครั้งตั้งแต่ระบบเริ่มทำงาน{% else %}<br>ยังไม่ได้เรียก (ระบบเรียกเมื่อคิวมีภาพค้างหรืออยู่ในช่วงเวลาที่ตั้ง){% endif %}</p>
+      {% if can(user, 'rounds') %}<form method="post" action="/admin/queue/wake-host" class="no-print"><button class="btn small">ทดสอบเรียกเดี๋ยวนี้</button></form>{% endif %}
+      {% else %}
+      <p class="note">ระบบยังไม่รู้ที่อยู่เว็บของตัวเอง จึงกัน host หลับไม่ได้{% if user.role == 'admin' %} <a href="/admin/settings">ใส่ ที่อยู่เว็บของระบบ ในหน้าตั้งค่า</a>{% endif %}</p>
+      {% endif %}
+    {% endif %}
+    <p class="muted" style="margin-top:10px">host ฟรีปิดบริการเมื่อไม่มีคนเปิดเว็บ 15 นาที ถ้าคิวยังไม่หมดในตอนนั้น ภาพจะค้างจนกว่าจะมีคนเปิดเว็บอีกครั้ง ตัวเลือกนี้กันไม่ให้เกิดเหตุนั้น{% if user.role == 'admin' %} <a href="/admin/settings">เปลี่ยนการตั้งค่า</a>{% endif %}</p>
+  </section>
+</div>
+
+<section class="panel" style="margin-top:14px">
+  <h2>ผู้ให้บริการ AI</h2>
+  {% if not q.providers %}<p class="muted">ยังไม่ได้ตั้งค่า</p>{% else %}
+  <div class="table-wrap"><table>
+    <tr><th>ช่อง</th><th>ผู้ให้บริการและโมเดล</th><th>สถานะ</th><th>รับงานวันนี้</th><th>จังหวะการเรียก</th><th>สำเร็จล่าสุด</th></tr>
+    {% for p in q.providers %}
+    <tr>
+      <td><b>{{ p.name }}</b></td>
+      <td>{{ p.type }} {{ p.model }}</td>
+      <td>{% if p.ok %}<span class="chip chip-done">พร้อมใช้</span>{% else %}<span class="chip chip-error">{{ p.kind_name }}</span><br><span class="muted">{{ p.reason }}</span>{% endif %}
+        {% if p.ok and p.last_error %}<br><span class="muted">ข้อผิดพลาดล่าสุด {{ p.last_error_at|dt }}: {{ p.last_error|truncate(160, true) }}</span>{% endif %}</td>
+      <td>{% if p.type == 'demo' %}-{% else %}{{ p.used }}{% if p.cap %} จาก {{ p.cap }}{% else %} (ไม่จำกัด){% endif %}{% endif %}</td>
+      <td>{% if p.type == 'demo' %}-{% else %}{{ p.rpm_now|num }} ครั้งต่อนาที{% if p.slowed %}<br><span class="muted">ชะลอเองจากที่ตั้ง {{ p.rpm }} เพราะเพิ่งถูกแจ้งว่าเรียกถี่เกิน จะกลับสู่ค่าที่ตั้งเองเมื่อเรียกสำเร็จต่อเนื่อง</span>{% endif %}{% endif %}</td>
+      <td style="white-space:nowrap">{{ p.last_ok|dt }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if q.providers|length < 2 %}<p class="note" style="margin-top:10px">ยังไม่มี AI สำรอง ถ้า AI หลักเกินโควตาหรือขัดข้อง ทั้งคิวจะหยุดรอจนกว่าจะกลับมา{% if user.role == 'admin' %} <a href="/admin/settings">เพิ่ม AI สำรองจากคนละผู้ให้บริการ</a> ใส่ได้ถึง 2 ตัว{% endif %}</p>{% endif %}
+  {% if q.backup_scored %}
+  <div class="note" style="margin-top:10px">
+    <p>มี {{ q.backup_scored }} ภาพในรอบที่เปิดอยู่ ที่ได้คะแนนจาก AI สำรองและยังไม่มีคนยืนยัน <a href="/photos?status=backup">ดูภาพ</a> โมเดลต่างกันอาจให้คะแนนต่างกัน ถ้าต้องการให้ทุกแผนกถูกวัดด้วยโมเดลเดียวกัน ให้ AI หลักวิเคราะห์ภาพกลุ่มนี้ใหม่เมื่อ AI หลักกลับมาใช้ได้</p>
+    {% if can(user, 'rounds') %}<form method="post" action="/admin/queue/rescore-backup" class="no-print" style="margin-top:8px" data-confirm="ให้ AI หลักวิเคราะห์ {{ q.backup_scored }} ภาพนี้ใหม่ คะแนนเดิมจะถูกแทนด้วยผลใหม่ ใช้โควตาของ AI หลักตามจำนวนภาพ"><button class="btn small">ให้ AI หลักวิเคราะห์ใหม่</button></form>{% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="panel" style="margin-top:14px">
+  <h2>ภาพที่รออยู่</h2>
+  {% if not waiting %}<p class="muted">ไม่มีภาพรอในคิว</p>{% else %}
+  <div class="table-wrap"><table>
+    <tr><th class="r">ลำดับ</th><th>ภาพ</th><th>แผนก</th><th>เข้าคิวเมื่อ</th><th>สถานะ</th><th>คาดว่าได้ผล</th><th>หมายเหตุ</th></tr>
+    {% for x in waiting %}
+    <tr>
+      <td class="r">{{ x.w.position }}</td>
+      <td><a href="/photos/{{ x.p.id }}">{{ x.p.id }} {{ x.p.area_name }}</a></td>
+      <td>{{ x.p.department.name }}</td>
+      <td style="white-space:nowrap">{{ (x.p.queued_at or x.p.created_at)|dt }}</td>
+      <td>{{ STATUS[x.p.status] }}{% if x.p.attempts %} <span class="muted">(ลองแล้ว {{ x.p.attempts }} ครั้ง)</span>{% endif %}</td>
+      <td style="white-space:nowrap">{% if x.w.eta_s is none %}เมื่อคิวเดินต่อ{% else %}อีกประมาณ <span data-countdown="{{ x.w.eta_s }}">{{ dur(x.w.eta_s) }}</span>{% endif %}</td>
+      <td class="muted">{{ (x.p.error or '')|truncate(200, true) }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if more %}<p class="muted" style="margin-top:8px">และอีก {{ more }} ภาพ</p>{% endif %}
+  {% endif %}
+</section>
+
+{% if errors %}
+<section class="panel" style="margin-top:14px">
+  <h2>ภาพที่วิเคราะห์ไม่สำเร็จ</h2>
+  <p class="muted" style="margin-bottom:8px">ภาพเหล่านี้ล้มเหลวเพราะตัวภาพเอง หรือลองครบจำนวนครั้งแล้ว แก้สาเหตุแล้วกด วิเคราะห์ภาพที่ไม่สำเร็จใหม่ ที่ด้านบน แสดง 30 ภาพล่าสุด</p>
+  <div class="table-wrap"><table>
+    <tr><th>ภาพ</th><th>แผนก</th><th>ส่งเมื่อ</th><th>สาเหตุ</th></tr>
+    {% for p in errors %}
+    <tr><td><a href="/photos/{{ p.id }}">{{ p.id }} {{ p.area_name }}</a></td><td>{{ p.department.name }}</td><td style="white-space:nowrap">{{ p.created_at|dt }}</td><td>{{ p.error }}</td></tr>
+    {% endfor %}
+  </table></div>
+</section>
+{% endif %}
+</div>
+
+<details class="panel" style="margin-top:14px">
+  <summary><b>คิวทำงานอย่างไร และทำไมภาพจึงรอ</b></summary>
+  <ul style="margin-top:10px">
+    <li>ภาพถูกวิเคราะห์ตามลำดับที่ส่ง พร้อมกันได้ {{ q.workers_want }} ภาพ โดยไม่เกินอัตราต่อนาทีที่ตั้งไว้</li>
+    <li>ถ้า AI หลักเกินโควตา ขัดข้อง หรือตั้งค่าผิด ระบบใช้ AI สำรองทันที ถ้าไม่มีสำรอง ทั้งคิวจะหยุดรอและเดินต่อเองเมื่อ AI กลับมา ภาพไม่เสียจำนวนครั้งที่ลองได้</li>
+    <li>ภาพที่ล้มเหลวเพราะตัวมันเอง (เช่น AI ตอบไม่ครบข้อ) จะลองใหม่หลัง 10 วินาที ถึง 5 นาที ไม่เกิน {{ s.ai_max_attempts }} ครั้ง แล้วจึงขึ้นว่าวิเคราะห์ไม่สำเร็จ</li>
+    <li>ภาพที่ค้างสถานะ กำลังวิเคราะห์ นานเกิน 20 นาที จะถูกคืนเข้าคิวเอง</li>
+    <li>ปุ่ม เดินคิวเดี๋ยวนี้ ยกเลิกการพักทั้งหมดแล้วให้ระบบลองเรียก AI ทันที ใช้หลังแก้ปัญหาที่ผู้ให้บริการแล้ว</li>
+  </ul>
+</details>
+{% endblock %}

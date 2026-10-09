@@ -209,6 +209,9 @@ class Photo(Base):
     appeal_reply = Column(Text, default="")
     appeal_closed_by = Column(String(120), default="")
     appeal_closed_at = Column(DateTime, nullable=True)
+    ai_slot = Column(String(4), default="")             # ช่องของ AI ที่ให้ผลนี้: ai1 = หลัก, ai2 / ai3 = สำรอง
+    queued_at = Column(DateTime, nullable=True)         # เวลาที่ภาพเข้าคิววิเคราะห์ครั้งล่าสุด (ส่งใหม่ หรือสั่งวิเคราะห์ใหม่)
+    started_at = Column(DateTime, nullable=True)        # เวลาที่คิวหยิบภาพนี้ไปวิเคราะห์ ใช้ตรวจภาพที่ค้างกลางทาง
     department = relationship("Department", lazy="joined")
 
     __table_args__ = (Index("ix_photos_round_sha", "round_id", "sha256"),)
@@ -329,7 +332,9 @@ class AuditLog(Base):
 class AiUsage(Base):
     __tablename__ = "ai_usage"
     day = Column(String(10), primary_key=True)
-    count = Column(Integer, default=0, nullable=False)
+    count = Column(Integer, default=0, nullable=False)       # AI หลัก
+    count2 = Column(Integer, default=0)                      # AI สำรอง 1 (นับแยก เพราะโควตาเป็นของคนละเจ้า)
+    count3 = Column(Integer, default=0)                      # AI สำรอง 2
 
 
 def log(db, user, action: str, detail: str = ""):

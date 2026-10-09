@@ -1,6 +1,7 @@
 <nav class="subnav no-print" aria-label="เมนูจัดการระบบ">
   <a href="/admin" class="{{ 'on' if path == '/admin' }}">ภาพรวม</a>
   {% if user.role == 'admin' %}<a href="/admin/setup" class="{{ 'on' if path.startswith('/admin/setup') }}">เริ่มต้นใช้งาน</a>{% endif %}
+  <a href="/admin/queue" class="{{ 'on' if path.startswith('/admin/queue') }}">คิววิเคราะห์</a>
   {% if can(user, 'rounds') %}<a href="/admin/rounds" class="{{ 'on' if path.startswith('/admin/rounds') }}">รอบการตรวจ</a>{% endif %}
   {% if can(user, 'criteria') %}<a href="/admin/criteria" class="{{ 'on' if path.startswith('/admin/criteria') }}">หมวดและคะแนนเต็ม</a>
   <a href="/admin/checkpoints" class="{{ 'on' if path.startswith('/admin/checkpoints') }}">รายการตรวจ</a>{% endif %}

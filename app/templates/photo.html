@@ -20,7 +20,7 @@
         <dt>ส่งเมื่อ</dt><dd>{{ p.created_at|dt }}</dd>
         {% if p.shot_at %}<dt>ถ่ายเมื่อ</dt><dd>{{ p.shot_at.strftime('%d/%m/%Y %H:%M') }}{% if p.stale %} <span class="chip chip-error">ถ่ายไว้นานแล้ว</span>{% endif %}</dd>{% endif %}
         {% if p.note %}<dt>หมายเหตุ</dt><dd>{{ p.note }}</dd>{% endif %}
-        {% if p.analyzed_at %}<dt>วิเคราะห์เมื่อ</dt><dd>{{ p.analyzed_at|dt }}</dd><dt>โมเดล</dt><dd>{{ p.model or '-' }}</dd>{% endif %}
+        {% if p.analyzed_at %}<dt>วิเคราะห์เมื่อ</dt><dd>{{ p.analyzed_at|dt }}</dd><dt>โมเดล</dt><dd>{{ p.model or '-' }}{% if p.ai_slot in ('ai2', 'ai3') %} <span class="chip chip-plain">AI สำรอง {{ '1' if p.ai_slot == 'ai2' else '2' }}</span>{% endif %}</dd>{% endif %}
         {% if p.verified_at %}<dt>ยืนยันผล</dt><dd>{{ p.verified_by }} เมื่อ {{ p.verified_at|dt }}</dd>{% elif p.status == 'done' %}<dt>ยืนยันผล</dt><dd>ยังไม่มีคนยืนยัน</dd>{% endif %}
         {% if not p.has_image %}<dt>ไฟล์ภาพ</dt><dd>ภาพเต็มถูกลบตามนโยบายพื้นที่เมื่อ {{ p.purged_at|d }} เหลือภาพย่อ</dd>{% endif %}
       </dl>
@@ -45,7 +45,7 @@
     </section>
     <section class="panel">
       <h2>เหตุผลและคำแนะนำรายเกณฑ์</h2>
-      {{ m.analysis(p) }}
+      {{ m.analysis(p, false, wait) }}
       {% set a = p.analysis or {} %}
       {% if p.status == 'done' and a.top_actions %}
       <div class="crit"><h3>ควรทำก่อน</h3><ol class="todo">{% for x in a.top_actions %}<li>{{ x }}</li>{% endfor %}</ol></div>

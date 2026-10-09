@@ -3,7 +3,7 @@
 {%- endmacro %}
 
 {% macro chip(p) -%}
-<span class="chip chip-{{ p.status }}">{{ STATUS[p.status] }}</span>{% if p.overridden %} <span class="chip chip-plain">ปรับโดยกรรมการ</span>{% endif %}{% if p.review_flag %} <span class="chip chip-rejected">ควรให้กรรมการตรวจ</span>{% endif %}{% if p.verified_at %} <span class="chip chip-done">ยืนยันแล้ว</span>{% endif %}{% if not p.has_image %} <span class="chip chip-plain">ลบภาพเต็มแล้ว</span>{% endif %}
+<span class="chip chip-{{ p.status }}">{{ STATUS[p.status] }}</span>{% if p.overridden %} <span class="chip chip-plain">ปรับโดยกรรมการ</span>{% endif %}{% if p.status == 'done' and p.ai_slot in ('ai2', 'ai3') %} <span class="chip chip-plain" title="AI หลักใช้ไม่ได้ในตอนนั้น ภาพนี้จึงได้คะแนนจาก AI สำรอง">AI สำรอง</span>{% endif %}{% if p.review_flag %} <span class="chip chip-rejected">ควรให้กรรมการตรวจ</span>{% endif %}{% if p.verified_at %} <span class="chip chip-done">ยืนยันแล้ว</span>{% endif %}{% if not p.has_image %} <span class="chip chip-plain">ลบภาพเต็มแล้ว</span>{% endif %}
 {%- endmacro %}
 
 {% macro levels(c) -%}
@@ -25,10 +25,11 @@
 {%- endmacro %}
 
 {# ผลวิเคราะห์ของภาพหนึ่งใบ: ใช้ทั้งหน้ารายละเอียดภาพและรายงาน #}
-{% macro analysis(p, compact=false) %}
+{% macro analysis(p, compact=false, wait='') %}
 {% set a = p.analysis or {} %}
 {% if p.status in ('pending', 'processing') %}
-  <p class="note blue">ภาพนี้อยู่ในคิว รอ AI วิเคราะห์{% if p.error %} ({{ p.error }}){% endif %}</p>
+  <p class="note blue" data-wait>{% if wait %}<span data-wait-head>{{ wait.head }}</span> <span data-wait-lead>{{ wait.lead }}</span> <b data-countdown="{{ wait.secs if wait.secs is not none else '' }}">{{ wait.time }}</b>{% if wait.tail %} <span data-wait-tail>({{ wait.tail }})</span>{% else %}<span data-wait-tail></span>{% endif %}{% else %}ภาพนี้อยู่ในคิว รอ AI วิเคราะห์{% if p.error %} ({{ p.error }}){% endif %}{% endif %}</p>
+  {% if not compact %}<p class="muted">หน้านี้จะแสดงผลเองเมื่อ AI วิเคราะห์เสร็จ ไม่ต้องกดโหลดใหม่ และไม่ต้องส่งภาพซ้ำ</p>{% endif %}
 {% elif p.status == 'error' %}
   <p class="note red">วิเคราะห์ไม่สำเร็จ: {{ p.error or 'ไม่ทราบสาเหตุ' }}</p>
 {% elif p.status == 'rejected' %}
